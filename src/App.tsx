@@ -106,6 +106,9 @@ function App() {
   const [teams, setTeams] = useState<[Team, Team] | null>(null);
   const [uniqueHeroes, setUniqueHeroes] = useState(false);
   const [avoidPreviousRoles, setAvoidPreviousRoles] = useState(false);
+  const [previousRoles, setPreviousRoles] = useState<Map<string, Role>>(
+    new Map(),
+  );
 
   const addPlayer = (team: "A" | "B") => {
     if (team === "A") {
@@ -141,10 +144,6 @@ function App() {
   const randomize = () => {
     if (playersA.length === 0 || playersB.length === 0) return;
 
-    const previousRoles = new Map<string, Role>();
-    if (avoidPreviousRoles && teams) {
-      teams.forEach((t) => t.forEach((p) => previousRoles.set(p.name, p.role)));
-    }
     const shouldAvoid = avoidPreviousRoles && previousRoles.size > 0;
 
     const team1Names = shuffle(playersA);
@@ -159,6 +158,11 @@ function App() {
       (shouldAvoid &&
         assignRolesAvoiding(team2Names, previousRoles, team1Heroes)) ||
       assignRoles(team2Names, team1Heroes);
+
+    const nextRoles = new Map<string, Role>();
+    team1.forEach((p) => nextRoles.set(p.name, p.role));
+    team2.forEach((p) => nextRoles.set(p.name, p.role));
+    setPreviousRoles(nextRoles);
     setTeams([team1, team2]);
   };
 
