@@ -62,6 +62,42 @@ function assignRoles(names: string[], excluded?: Set<string>): Team {
   });
 }
 
+function assignRolesAvoiding(
+  names: string[],
+  previousRoles: Map<string, Role>,
+  excluded?: Set<string>,
+): Team | null {
+  const roles = getRoleOrder(names.length);
+  const assignment: string[] = new Array(roles.length);
+  const taken = new Set<number>();
+
+  const tryFill = (slot: number): boolean => {
+    if (slot === roles.length) return true;
+    const role = roles[slot];
+    const candidates = shuffle(
+      names.map((_, i) => i).filter((i) => !taken.has(i)),
+    );
+    for (const i of candidates) {
+      if (previousRoles.get(names[i]) === role) continue;
+      taken.add(i);
+      assignment[slot] = names[i];
+      if (tryFill(slot + 1)) return true;
+      taken.delete(i);
+    }
+    return false;
+  };
+
+  if (!tryFill(0)) return null;
+
+  const used = new Set(excluded);
+  return assignment.map((name, i) => {
+    const role = roles[i];
+    const hero = randomHero(role, used);
+    used.add(hero);
+    return { name, role, hero, rerolled: false };
+  });
+}
+
 function App() {
   const [inputA, setInputA] = useState("");
   const [inputB, setInputB] = useState("");
@@ -69,6 +105,7 @@ function App() {
   const [playersB, setPlayersB] = useState<string[]>([]);
   const [teams, setTeams] = useState<[Team, Team] | null>(null);
   const [uniqueHeroes, setUniqueHeroes] = useState(false);
+  const [avoidPreviousRoles, setAvoidPreviousRoles] = useState(false);
 
   const addPlayer = (team: "A" | "B") => {
     if (team === "A") {
@@ -103,13 +140,25 @@ function App() {
 
   const randomize = () => {
     if (playersA.length === 0 || playersB.length === 0) return;
+
+    const previousRoles = new Map<string, Role>();
+    if (avoidPreviousRoles && teams) {
+      teams.forEach((t) => t.forEach((p) => previousRoles.set(p.name, p.role)));
+    }
+    const shouldAvoid = avoidPreviousRoles && previousRoles.size > 0;
+
     const team1Names = shuffle(playersA);
     const team2Names = shuffle(playersB);
-    const team1 = assignRoles(team1Names);
+    const team1 =
+      (shouldAvoid && assignRolesAvoiding(team1Names, previousRoles)) ||
+      assignRoles(team1Names);
     const team1Heroes = uniqueHeroes
       ? new Set(team1.map((p) => p.hero))
       : undefined;
-    const team2 = assignRoles(team2Names, team1Heroes);
+    const team2 =
+      (shouldAvoid &&
+        assignRolesAvoiding(team2Names, previousRoles, team1Heroes)) ||
+      assignRoles(team2Names, team1Heroes);
     setTeams([team1, team2]);
   };
 
@@ -216,6 +265,15 @@ function App() {
           onChange={(e) => setUniqueHeroes(e.target.checked)}
         />
         Unique heroes across teams
+      </label>
+
+      <label className="unique-toggle">
+        <input
+          type="checkbox"
+          checked={avoidPreviousRoles}
+          onChange={(e) => setAvoidPreviousRoles(e.target.checked)}
+        />
+        Don't give same role from previous randomization
       </label>
 
       <div className="action-buttons">
