@@ -301,3 +301,64 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+/* Password gate */
+.password-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.password-box {
+  background: #16213e;
+  border-radius: 10px;
+  padding: 2rem;
+  border-top: 4px solid #f77f00;
+  text-align: center;
+  width: 100%;
+  max-width: 320px;
+}
+
+.password-box h2 {
+  margin: 0 0 1rem;
+  color: #f77f00;
+  font-size: 1.2rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.password-box input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+  border-radius: 6px;
+  border: 1px solid #2a3a5e;
+  background: #0f1a30;
+  color: #fff;
+  margin-bottom: 0.75rem;
+  box-sizing: border-box;
+}
+
+.password-box button {
+  width: 100%;
+  padding: 0.6rem;
+  background: #f77f00;
+  color: #16213e;
+  font-weight: bold;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.password-box button:hover {
+  background: #ff9020;
+}
+
+.password-error {
+  color: #e74c3c;
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}

@@ -5,7 +5,8 @@
       "Bash(npx:*)",
       "Bash(cp -r . ..)",
       "Bash(rm -rf ow-randomizer)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(node *)"
     ]
   }
 }
