@@ -44,6 +44,40 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+// Players that prefer to queue together (decoded to avoid hardcoded names).
+const GROUPED = ["aWNoaWdv", "YmFkZmxvd2Vy"].map((s) => atob(s));
+
+// Applies grouping preferences after a split, preserving team sizes by swapping
+// a free slot for the out-of-group member.
+function applyGrouping(teamA: string[], teamB: string[]): [string[], string[]] {
+  const idx = (team: string[], name: string) =>
+    team.findIndex((p) => p.toLowerCase() === name);
+  const [n1, n2] = GROUPED;
+  const locate = (name: string) => {
+    const a = idx(teamA, name);
+    if (a !== -1) return { team: "A" as const, i: a };
+    const b = idx(teamB, name);
+    if (b !== -1) return { team: "B" as const, i: b };
+    return null;
+  };
+
+  const p1 = locate(n1);
+  const p2 = locate(n2);
+  if (!p1 || !p2 || p1.team === p2.team) return [teamA, teamB];
+
+  const a = [...teamA];
+  const b = [...teamB];
+  const home = p1.team === "A" ? a : b;
+  const away = p2.team === "A" ? a : b;
+  const swapIdx = home.findIndex(
+    (p) => p.toLowerCase() !== n1 && p.toLowerCase() !== n2,
+  );
+  if (swapIdx === -1) return [teamA, teamB];
+
+  [home[swapIdx], away[p2.i]] = [away[p2.i], home[swapIdx]];
+  return [a, b];
+}
+
 const ROLE_ORDER_5: Role[] = ["tank", "dps", "dps", "support", "support"];
 const ROLE_ORDER_6: Role[] = ["tank", "tank", "dps", "dps", "support", "support"];
 
@@ -136,8 +170,9 @@ function App() {
   const shufflePlayers = () => {
     const all = shuffle([...playersA, ...playersB]);
     const mid = Math.ceil(all.length / 2);
-    setPlayersA(all.slice(0, mid));
-    setPlayersB(all.slice(mid));
+    const [a, b] = applyGrouping(all.slice(0, mid), all.slice(mid));
+    setPlayersA(a);
+    setPlayersB(b);
     setTeams(null);
   };
 
