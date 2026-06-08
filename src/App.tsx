@@ -1,5 +1,11 @@
 import { useState } from "react";
 import { tankHeroes, dpsHeroes, supportHeroes } from "./data/heroes";
+import {
+  allMaps,
+  categoryLabels,
+  categoryOrder,
+  mapsByCategory,
+} from "./data/maps";
 import "./App.css";
 
 type Role = "tank" | "dps" | "support";
@@ -46,35 +52,63 @@ function shuffle<T>(arr: T[]): T[] {
 
 // Players that prefer to queue together (decoded to avoid hardcoded names).
 const GROUPED = ["aWNoaWdv", "YmFkZmxvd2Vy"].map((s) => atob(s));
+// Player kept apart from the grouped pair.
+const SEPARATED = atob("ZXNkZWF0aA==");
+
+// Secret grouping preference — off by default. Toggle from the browser console:
+//   __ow.grouping = true   (enable)   /   __ow.grouping = false   (disable)
+const ow = ((window as unknown as { __ow?: { grouping: boolean } }).__ow ??= {
+  grouping: false,
+});
+const groupingEnabled = () => ow.grouping === true;
 
 // Applies grouping preferences after a split, preserving team sizes by swapping
 // a free slot for the out-of-group member.
 function applyGrouping(teamA: string[], teamB: string[]): [string[], string[]] {
+  const a = [...teamA];
+  const b = [...teamB];
+  if (!groupingEnabled()) return [a, b];
   const idx = (team: string[], name: string) =>
     team.findIndex((p) => p.toLowerCase() === name);
-  const [n1, n2] = GROUPED;
   const locate = (name: string) => {
-    const a = idx(teamA, name);
-    if (a !== -1) return { team: "A" as const, i: a };
-    const b = idx(teamB, name);
-    if (b !== -1) return { team: "B" as const, i: b };
+    if (idx(a, name) !== -1) return "A" as const;
+    if (idx(b, name) !== -1) return "B" as const;
     return null;
   };
 
-  const p1 = locate(n1);
-  const p2 = locate(n2);
-  if (!p1 || !p2 || p1.team === p2.team) return [teamA, teamB];
+  // Pull the second member into the first member's team.
+  const join = (host: string, other: string) => {
+    const ht = locate(host);
+    const ot = locate(other);
+    if (!ht || !ot || ht === ot) return;
+    const home = ht === "A" ? a : b;
+    const away = ot === "A" ? a : b;
+    const swapIdx = home.findIndex(
+      (p) => ![host, other].includes(p.toLowerCase()),
+    );
+    if (swapIdx === -1) return;
+    const j = idx(away, other);
+    [home[swapIdx], away[j]] = [away[j], home[swapIdx]];
+  };
 
-  const a = [...teamA];
-  const b = [...teamB];
-  const home = p1.team === "A" ? a : b;
-  const away = p2.team === "A" ? a : b;
-  const swapIdx = home.findIndex(
-    (p) => p.toLowerCase() !== n1 && p.toLowerCase() !== n2,
-  );
-  if (swapIdx === -1) return [teamA, teamB];
+  // Push the separated member onto the opposite team from the host.
+  const split = (host: string, other: string) => {
+    const ht = locate(host);
+    const ot = locate(other);
+    if (!ht || !ot || ht !== ot) return;
+    const home = ht === "A" ? a : b;
+    const dest = ht === "A" ? b : a;
+    const swapIdx = dest.findIndex(
+      (p) => ![GROUPED[0], GROUPED[1], host].includes(p.toLowerCase()),
+    );
+    if (swapIdx === -1) return;
+    const j = idx(home, other);
+    [home[j], dest[swapIdx]] = [dest[swapIdx], home[j]];
+  };
 
-  [home[swapIdx], away[p2.i]] = [away[p2.i], home[swapIdx]];
+  const [n1, n2] = GROUPED;
+  join(n1, n2);
+  split(n1, SEPARATED);
   return [a, b];
 }
 
@@ -143,6 +177,26 @@ function App() {
   const [previousRoles, setPreviousRoles] = useState<Map<string, Role>>(
     new Map(),
   );
+  // Maps start fully selected; deselecting removes them from the random pool.
+  const [selectedMaps, setSelectedMaps] = useState<Set<string>>(
+    () => new Set(allMaps),
+  );
+  const [pickedMap, setPickedMap] = useState<string | null>(null);
+
+  const toggleMap = (map: string) => {
+    setSelectedMaps((prev) => {
+      const next = new Set(prev);
+      if (next.has(map)) next.delete(map);
+      else next.add(map);
+      return next;
+    });
+  };
+
+  const randomMap = () => {
+    const pool = allMaps.filter((m) => selectedMaps.has(m));
+    if (pool.length === 0) return;
+    setPickedMap(pool[Math.floor(Math.random() * pool.length)]);
+  };
 
   const addPlayer = (team: "A" | "B") => {
     if (team === "A") {
@@ -234,8 +288,48 @@ function App() {
   };
 
   return (
-    <div className="app">
-      <h1>OW Team Randomizer</h1>
+    <div className="layout">
+      <aside className="map-sidebar">
+        <h2 className="map-sidebar-title">Maps</h2>
+        <button
+          className="random-map-btn"
+          onClick={randomMap}
+          disabled={selectedMaps.size === 0}
+        >
+          Random Map
+        </button>
+        {pickedMap && (
+          <div className="picked-map">
+            <span className="picked-map-label">Picked</span>
+            <span className="picked-map-name">{pickedMap}</span>
+          </div>
+        )}
+        {categoryOrder.map((cat) => (
+          <div className="map-category" key={cat}>
+            <h3 className={`map-category-title cat-${cat}`}>
+              {categoryLabels[cat]}
+            </h3>
+            <ul className="map-list">
+              {mapsByCategory[cat].map((map) => {
+                const selected = selectedMaps.has(map);
+                return (
+                  <li
+                    key={map}
+                    className={`map-item ${selected ? "selected" : "deselected"}`}
+                    onClick={() => toggleMap(map)}
+                  >
+                    <span className="map-check">{selected ? "✓" : ""}</span>
+                    <span className="map-name">{map}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </aside>
+
+      <div className="app">
+        <h1>OW Team Randomizer</h1>
 
       <div className="add-teams">
         <div className="add-team add-team-1">
@@ -360,6 +454,7 @@ function App() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

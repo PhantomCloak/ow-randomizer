@@ -302,6 +302,172 @@ h1 {
   }
 }
 
+/* Layout with map sidebar */
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.layout .app {
+  flex: 1;
+  margin: 0;
+  padding: 1rem 0;
+}
+
+.map-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #16213e;
+  border-radius: 10px;
+  padding: 1rem;
+  border-top: 4px solid #f77f00;
+  position: sticky;
+  top: 1rem;
+  text-align: left;
+}
+
+.map-sidebar-title {
+  color: #f77f00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.random-map-btn {
+  width: 100%;
+  padding: 0.7rem;
+  border: none;
+  border-radius: 8px;
+  background: #f77f00;
+  color: #1a1a2e;
+  font-weight: 700;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: transform 0.1s, opacity 0.2s;
+}
+
+.random-map-btn:hover:not(:disabled) {
+  transform: scale(1.03);
+}
+
+.random-map-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.picked-map {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  margin: 0.75rem 0;
+  padding: 0.6rem;
+  background: #0f3460;
+  border-radius: 8px;
+}
+
+.picked-map-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #aaa;
+}
+
+.picked-map-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f0c040;
+}
+
+.map-category {
+  margin-top: 1rem;
+}
+
+.map-category-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid #2a3a5e;
+}
+
+.cat-flashpoint {
+  color: #e67e22;
+}
+.cat-control {
+  color: #2ecc71;
+}
+.cat-hybrid {
+  color: #9b59b6;
+}
+.cat-escort {
+  color: #3498db;
+}
+.cat-push {
+  color: #e74c3c;
+}
+
+.map-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.map-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.map-item.selected {
+  background: #0f3460;
+}
+
+.map-item.deselected {
+  opacity: 0.4;
+}
+
+.map-item:hover {
+  background: #1d4a7a;
+}
+
+.map-check {
+  width: 14px;
+  color: #2ecc71;
+  font-weight: 700;
+  text-align: center;
+}
+
+.map-item .map-name {
+  flex: 1;
+}
+
+@media (max-width: 800px) {
+  .layout {
+    flex-direction: column;
+  }
+  .map-sidebar {
+    width: 100%;
+    position: static;
+    box-sizing: border-box;
+  }
+}
+
 /* Password gate */
 .password-gate {
   min-height: 100vh;
