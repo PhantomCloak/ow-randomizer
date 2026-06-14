@@ -565,6 +565,41 @@ h1 {
   z-index: 10;
 }
 
+.lang-toggle {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  gap: 2px;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 999px;
+  padding: 2px;
+  z-index: 20;
+}
+
+.lang-toggle button {
+  border: none;
+  background: transparent;
+  color: #9aa3b8;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.lang-toggle button.active {
+  background: #f77f00;
+  color: #1a1a2e;
+}
+
+/* Offline pill sits left of the language toggle to avoid overlap. */
+.sync-pill {
+  right: 5rem;
+}
+
 .mode-pill {
   position: fixed;
   top: 0.75rem;

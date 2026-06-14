@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { md5 } from "./md5";
 import { loginOrRegister } from "./sync";
+import { useI18n } from "./i18n";
+import { LanguageToggle } from "./LanguageToggle";
 
 const PASSWORD_HASH = "09cc81fcf02edae5182ebbe1d4e880a4";
 
@@ -14,6 +16,7 @@ type Props = { children: (g: GateState) => ReactNode };
 type Screen = "choose" | "admin" | "user";
 
 export function PasswordGate({ children }: Props) {
+  const { t } = useI18n();
   const [screen, setScreen] = useState<Screen>("choose");
   const [gate, setGate] = useState<GateState | null>(null);
 
@@ -37,7 +40,7 @@ export function PasswordGate({ children }: Props) {
   const submitUser = async () => {
     const trimmed = userName.trim();
     if (!trimmed || userPw.length < 4) {
-      setUserErr("Name + password (min 4 chars)");
+      setUserErr(t("namePwMin"));
       return;
     }
     setUserBusy(true);
@@ -47,10 +50,10 @@ export function PasswordGate({ children }: Props) {
       setGate({ mode: "user", name: trimmed, password: userPw });
     } catch (e) {
       const msg = (e as { message?: string }).message ?? "";
-      if (msg.includes("unauthorized")) setUserErr("Incorrect password");
+      if (msg.includes("unauthorized")) setUserErr(t("incorrectPassword"));
       else if (msg.includes("auth unavailable"))
-        setUserErr("Login unavailable — Supabase not configured");
-      else setUserErr(msg || "Login failed");
+        setUserErr(t("loginUnavailable"));
+      else setUserErr(msg || t("loginFailed"));
     } finally {
       setUserBusy(false);
     }
@@ -60,18 +63,23 @@ export function PasswordGate({ children }: Props) {
 
   return (
     <div className="password-gate">
+      <LanguageToggle />
       <div className="password-box">
         {screen === "choose" && (
           <>
-            <h2>Open Randomizer</h2>
+            <h2>{t("openRandomizer")}</h2>
             <div className="gate-actions">
-              <button onClick={() => setScreen("user")}>Login as Player</button>
-              <button onClick={() => setScreen("admin")}>Enter as Admin</button>
+              <button onClick={() => setScreen("user")}>
+                {t("loginAsPlayer")}
+              </button>
+              <button onClick={() => setScreen("admin")}>
+                {t("enterAsAdmin")}
+              </button>
               <button
                 className="view-only-btn"
                 onClick={() => setGate({ mode: "viewer" })}
               >
-                View Only
+                {t("viewOnly")}
               </button>
             </div>
           </>
@@ -79,7 +87,7 @@ export function PasswordGate({ children }: Props) {
 
         {screen === "admin" && (
           <>
-            <h2>Admin Password</h2>
+            <h2>{t("adminPassword")}</h2>
             <input
               type="password"
               value={adminPw}
@@ -89,10 +97,10 @@ export function PasswordGate({ children }: Props) {
                 if (adminErr) setAdminErr(false);
               }}
               onKeyDown={(e) => e.key === "Enter" && submitAdmin()}
-              placeholder="Enter password"
+              placeholder={t("enterPassword")}
             />
             <div className="gate-actions">
-              <button onClick={submitAdmin}>Unlock</button>
+              <button onClick={submitAdmin}>{t("unlock")}</button>
               <button
                 className="view-only-btn"
                 onClick={() => {
@@ -101,16 +109,18 @@ export function PasswordGate({ children }: Props) {
                   setAdminErr(false);
                 }}
               >
-                Back
+                {t("back")}
               </button>
             </div>
-            {adminErr && <p className="password-error">Incorrect password</p>}
+            {adminErr && (
+              <p className="password-error">{t("incorrectPassword")}</p>
+            )}
           </>
         )}
 
         {screen === "user" && (
           <>
-            <h2>Login / Register</h2>
+            <h2>{t("loginRegister")}</h2>
             <input
               type="text"
               value={userName}
@@ -121,7 +131,7 @@ export function PasswordGate({ children }: Props) {
                 if (userErr) setUserErr(null);
               }}
               onKeyDown={(e) => e.key === "Enter" && submitUser()}
-              placeholder="Name"
+              placeholder={t("name")}
             />
             <input
               type="password"
@@ -131,11 +141,11 @@ export function PasswordGate({ children }: Props) {
                 if (userErr) setUserErr(null);
               }}
               onKeyDown={(e) => e.key === "Enter" && submitUser()}
-              placeholder="Password"
+              placeholder={t("password")}
             />
             <div className="gate-actions">
               <button onClick={submitUser} disabled={userBusy}>
-                {userBusy ? "..." : "Continue"}
+                {userBusy ? "..." : t("continue")}
               </button>
               <button
                 className="view-only-btn"
@@ -146,12 +156,10 @@ export function PasswordGate({ children }: Props) {
                   setUserErr(null);
                 }}
               >
-                Back
+                {t("back")}
               </button>
             </div>
-            <p className="gate-hint">
-              First time? Just pick a name — you'll be registered automatically.
-            </p>
+            <p className="gate-hint">{t("firstTimeHint")}</p>
             {userErr && <p className="password-error">{userErr}</p>}
           </>
         )}

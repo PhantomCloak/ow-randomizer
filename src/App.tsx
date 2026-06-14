@@ -16,6 +16,8 @@ import {
   type Team,
 } from "./sync";
 import type { GateState } from "./PasswordGate";
+import { useI18n } from "./i18n";
+import { LanguageToggle } from "./LanguageToggle";
 import "./App.css";
 
 const ACTIVE_CAP = 12;
@@ -188,6 +190,7 @@ function pickRerollHero(
 type AppProps = { gate: GateState };
 
 function App({ gate }: AppProps) {
+  const { t } = useI18n();
   const isAdmin = gate.mode === "admin";
   const isUser = gate.mode === "user";
   const userName = gate.mode === "user" ? gate.name : null;
@@ -410,27 +413,28 @@ function App({ gate }: AppProps) {
 
   return (
     <div className="layout">
-      {!online && <div className="sync-pill">offline</div>}
+      <LanguageToggle />
+      {!online && <div className="sync-pill">{t("offline")}</div>}
       <div className="mode-pill">
-        {gate.mode === "admin" && "ADMIN"}
-        {gate.mode === "user" && `PLAYER · ${userName}`}
-        {gate.mode === "viewer" && "VIEWER"}
+        {gate.mode === "admin" && t("admin")}
+        {gate.mode === "user" && t("player", { name: userName ?? "" })}
+        {gate.mode === "viewer" && t("viewer")}
       </div>
 
       <aside className="map-sidebar">
-        <h2 className="map-sidebar-title">Maps</h2>
+        <h2 className="map-sidebar-title">{t("maps")}</h2>
         {isAdmin && (
           <button
             className="random-map-btn"
             onClick={randomMap}
             disabled={selectedMaps.size === 0}
           >
-            Random Map
+            {t("randomMap")}
           </button>
         )}
         {pickedMap && (
           <div className="picked-map">
-            <span className="picked-map-label">Picked</span>
+            <span className="picked-map-label">{t("picked")}</span>
             <span className="picked-map-name">{pickedMap}</span>
           </div>
         )}
@@ -463,13 +467,14 @@ function App({ gate }: AppProps) {
 
         <div className="active-pool">
           <h3>
-            Active Players ({activePlayers.length}/{ACTIVE_CAP})
+            {t("activePlayers", {
+              n: activePlayers.length,
+              cap: ACTIVE_CAP,
+            })}
           </h3>
           {activePlayers.length === 0 ? (
             <p className="empty-hint">
-              {isAdmin
-                ? "Add players from the registry below."
-                : "Waiting for admin to set up the lobby."}
+              {isAdmin ? t("addFromRegistry") : t("waitingLobby")}
             </p>
           ) : (
             <ul className="roster-list">
@@ -497,7 +502,7 @@ function App({ gate }: AppProps) {
             onChange={(e) => setUniqueHeroes(e.target.checked)}
             disabled={!isAdmin}
           />
-          Unique heroes across teams
+          {t("uniqueHeroes")}
         </label>
 
         <label className="unique-toggle">
@@ -507,7 +512,7 @@ function App({ gate }: AppProps) {
             onChange={(e) => setAvoidPreviousRoles(e.target.checked)}
             disabled={!isAdmin}
           />
-          Don't give same role from previous randomization
+          {t("avoidPrevRoles")}
         </label>
 
         {isAdmin && (
@@ -517,7 +522,7 @@ function App({ gate }: AppProps) {
               onClick={randomize}
               disabled={activePlayers.length < 2}
             >
-              Randomize Teams
+              {t("randomizeTeams")}
             </button>
           </div>
         )}
@@ -526,7 +531,7 @@ function App({ gate }: AppProps) {
           <div className="teams">
             {teams.map((team, ti) => (
               <div className={`team team-${ti + 1}`} key={ti}>
-                <h2>Team {ti === 0 ? "A" : "B"}</h2>
+                <h2>{`${t("team")} ${ti === 0 ? "A" : "B"}`}</h2>
                 <ul>
                   {team.map((player, pi) => {
                     const isMine =
@@ -551,10 +556,12 @@ function App({ gate }: AppProps) {
                             }
                             disabled={player.rerolled || rerollBusy}
                             title={
-                              player.rerolled ? "Already rerolled" : "Reroll hero"
+                              player.rerolled
+                                ? t("alreadyRerolled")
+                                : t("rerollHero")
                             }
                           >
-                            Reroll
+                            {t("reroll")}
                           </button>
                         )}
                       </li>
@@ -568,29 +575,31 @@ function App({ gate }: AppProps) {
 
         {isAdmin && (
           <div className="user-registry">
-            <h3>Registered Users ({registry.length})</h3>
+            <h3>{t("registeredUsers", { n: registry.length })}</h3>
             {registry.length === 0 ? (
-              <p className="empty-hint">No registrations yet.</p>
+              <p className="empty-hint">{t("noRegistrations")}</p>
             ) : (
               <ul className="registry-list">
                 {activePlayers.map((name) => (
                   <li key={`active-${name}`} className="registry-active">
-                    <span className="registry-badge">ACTIVE</span>
+                    <span className="registry-badge">{t("active")}</span>
                     <span className="registry-name">{name}</span>
-                    <button onClick={() => removeActive(name)}>Remove</button>
+                    <button onClick={() => removeActive(name)}>
+                      {t("remove")}
+                    </button>
                   </li>
                 ))}
                 {inactiveUsers.map((u) => (
                   <li key={`inactive-${u.name}`} className="registry-inactive">
                     <span className="registry-badge registry-badge-off">
-                      INACTIVE
+                      {t("inactive")}
                     </span>
                     <span className="registry-name">{u.name}</span>
                     <button
                       onClick={() => addActive(u.name)}
                       disabled={activePlayers.length >= ACTIVE_CAP}
                     >
-                      Add
+                      {t("add")}
                     </button>
                   </li>
                 ))}
