@@ -564,3 +564,116 @@ h1 {
   letter-spacing: 1px;
   z-index: 10;
 }
+
+.mode-pill {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  background: #0f3460;
+  color: #f77f00;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  z-index: 10;
+}
+
+.gate-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: #9aa3b8;
+}
+
+/* Active pool & registry */
+.active-pool {
+  background: #16213e;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  text-align: left;
+}
+
+.active-pool h3 {
+  margin: 0 0 0.5rem;
+  color: #f77f00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 1rem;
+}
+
+.empty-hint {
+  color: #9aa3b8;
+  font-style: italic;
+  margin: 0.25rem 0;
+}
+
+.user-registry {
+  background: #16213e;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-top: 1rem;
+  text-align: left;
+}
+
+.user-registry h3 {
+  margin: 0 0 0.75rem;
+  color: #f77f00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 1rem;
+}
+
+.registry-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.registry-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: #0f3460;
+  border-radius: 6px;
+}
+
+.registry-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.registry-badge {
+  font-size: 0.65rem;
+  letter-spacing: 1px;
+  background: #f77f00;
+  color: #1a1a2e;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.registry-badge-off {
+  background: #2a3a5e;
+  color: #9aa3b8;
+}
+
+.registry-list button {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  background: #f77f00;
+  color: #1a1a2e;
+  font-weight: 700;
+}
+
+.registry-list button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

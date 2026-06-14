@@ -6,8 +6,19 @@ import {
   categoryOrder,
   mapsByCategory,
 } from "./data/maps";
-import { useSharedSync, type Role, type SharedState, type Team } from "./sync";
+import {
+  listUsers,
+  useSharedSync,
+  userReroll,
+  type RegisteredUser,
+  type Role,
+  type SharedState,
+  type Team,
+} from "./sync";
+import type { GateState } from "./PasswordGate";
 import "./App.css";
+
+const ACTIVE_CAP = 12;
 
 function getHeroPool(role: Role): string[] {
   switch (role) {
@@ -66,7 +77,6 @@ function applyGrouping(teamA: string[], teamB: string[]): [string[], string[]] {
     return null;
   };
 
-  // Pull the second member into the first member's team.
   const join = (host: string, other: string) => {
     const ht = locate(host);
     const ot = locate(other);
@@ -81,7 +91,6 @@ function applyGrouping(teamA: string[], teamB: string[]): [string[], string[]] {
     [home[swapIdx], away[j]] = [away[j], home[swapIdx]];
   };
 
-  // Push the separated member onto the opposite team from the host.
   const split = (host: string, other: string) => {
     const ht = locate(host);
     const ot = locate(other);
@@ -156,13 +165,36 @@ function assignRolesAvoiding(
   });
 }
 
-type AppProps = { isAdmin: boolean; password: string | null };
+// Pick a fresh hero for a player honoring same-role exclusion on their team
+// and (optionally) unique-heroes-across-teams. Used by both admin reroll and
+// user self-reroll.
+function pickRerollHero(
+  teams: [Team, Team],
+  teamIdx: number,
+  playerIdx: number,
+  uniqueHeroes: boolean,
+): string {
+  const player = teams[teamIdx][playerIdx];
+  const excluded = new Set<string>([player.hero]);
+  teams[teamIdx].forEach((p, i) => {
+    if (i !== playerIdx && p.role === player.role) excluded.add(p.hero);
+  });
+  if (uniqueHeroes) {
+    teams[teamIdx === 0 ? 1 : 0].forEach((p) => excluded.add(p.hero));
+  }
+  return randomHero(player.role, excluded);
+}
 
-function App({ isAdmin, password }: AppProps) {
-  const [inputA, setInputA] = useState("");
-  const [inputB, setInputB] = useState("");
-  const [playersA, setPlayersA] = useState<string[]>([]);
-  const [playersB, setPlayersB] = useState<string[]>([]);
+type AppProps = { gate: GateState };
+
+function App({ gate }: AppProps) {
+  const isAdmin = gate.mode === "admin";
+  const isUser = gate.mode === "user";
+  const userName = gate.mode === "user" ? gate.name : null;
+  const password =
+    gate.mode === "admin" || gate.mode === "user" ? gate.password : null;
+
+  const [activePlayers, setActivePlayers] = useState<string[]>([]);
   const [teams, setTeams] = useState<[Team, Team] | null>(null);
   const [uniqueHeroes, setUniqueHeroes] = useState(false);
   const [avoidPreviousRoles, setAvoidPreviousRoles] = useState(false);
@@ -181,8 +213,7 @@ function App({ isAdmin, password }: AppProps) {
 
   const snapshot = useMemo<SharedState>(
     () => ({
-      playersA,
-      playersB,
+      activePlayers,
       teams,
       uniqueHeroes,
       avoidPreviousRoles,
@@ -191,8 +222,7 @@ function App({ isAdmin, password }: AppProps) {
       pickedMap,
     }),
     [
-      playersA,
-      playersB,
+      activePlayers,
       teams,
       uniqueHeroes,
       avoidPreviousRoles,
@@ -203,18 +233,15 @@ function App({ isAdmin, password }: AppProps) {
   );
 
   const applyRemote = useCallback((s: SharedState) => {
-    setPlayersA(s.playersA);
-    setPlayersB(s.playersB);
+    setActivePlayers(s.activePlayers);
     setTeams(s.teams);
     setUniqueHeroes(s.uniqueHeroes);
     setAvoidPreviousRoles(s.avoidPreviousRoles);
     setPreviousRoles(new Map(s.previousRoles));
     setSelectedMaps(new Set(s.selectedMaps));
     setPickedMap(s.pickedMap);
-    // Match the shape produced by `snapshot` so the next push effect dedupes.
     lastSyncedJsonRef.current = JSON.stringify({
-      playersA: s.playersA,
-      playersB: s.playersB,
+      activePlayers: s.activePlayers,
       teams: s.teams,
       uniqueHeroes: s.uniqueHeroes,
       avoidPreviousRoles: s.avoidPreviousRoles,
@@ -226,8 +253,8 @@ function App({ isAdmin, password }: AppProps) {
 
   const { push, online, ready } = useSharedSync({
     applyRemote,
-    isAdmin,
-    password,
+    canPush: isAdmin,
+    password: isAdmin ? password : null,
   });
 
   useEffect(() => {
@@ -237,6 +264,27 @@ function App({ isAdmin, password }: AppProps) {
     lastSyncedJsonRef.current = json;
     void push(snapshot);
   }, [snapshot, isAdmin, ready, push]);
+
+  // Admin: list of all registered users for the admin player pool panel.
+  const [registry, setRegistry] = useState<RegisteredUser[]>([]);
+  useEffect(() => {
+    if (!isAdmin || !password) return;
+    let cancelled = false;
+    const fetchUsers = async () => {
+      try {
+        const users = await listUsers(password);
+        if (!cancelled) setRegistry(users);
+      } catch (e) {
+        if (!cancelled) console.warn("[users] fetch failed", e);
+      }
+    };
+    void fetchUsers();
+    const id = setInterval(fetchUsers, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isAdmin, password]);
 
   const toggleMap = (map: string) => {
     setSelectedMaps((prev) => {
@@ -253,45 +301,29 @@ function App({ isAdmin, password }: AppProps) {
     setPickedMap(pool[Math.floor(Math.random() * pool.length)]);
   };
 
-  const addPlayer = (team: "A" | "B") => {
-    if (team === "A") {
-      const name = inputA.trim();
-      if (!name || playersA.length >= 6 || playersA.includes(name) || playersB.includes(name)) return;
-      setPlayersA([...playersA, name]);
-      setInputA("");
-    } else {
-      const name = inputB.trim();
-      if (!name || playersB.length >= 6 || playersA.includes(name) || playersB.includes(name)) return;
-      setPlayersB([...playersB, name]);
-      setInputB("");
-    }
-  };
-
-  const removePlayer = (team: "A" | "B", name: string) => {
-    if (team === "A") {
-      setPlayersA(playersA.filter((p) => p !== name));
-    } else {
-      setPlayersB(playersB.filter((p) => p !== name));
-    }
+  const addActive = (name: string) => {
+    if (activePlayers.length >= ACTIVE_CAP) return;
+    if (activePlayers.includes(name)) return;
+    setActivePlayers([...activePlayers, name]);
     setTeams(null);
   };
 
-  const shufflePlayers = () => {
-    const all = shuffle([...playersA, ...playersB]);
-    const mid = Math.ceil(all.length / 2);
-    const [a, b] = applyGrouping(all.slice(0, mid), all.slice(mid));
-    setPlayersA(a);
-    setPlayersB(b);
+  const removeActive = (name: string) => {
+    setActivePlayers(activePlayers.filter((p) => p !== name));
     setTeams(null);
   };
 
   const randomize = () => {
-    if (playersA.length === 0 || playersB.length === 0) return;
+    if (activePlayers.length < 2) return;
 
     const shouldAvoid = avoidPreviousRoles && previousRoles.size > 0;
+    const shuffled = shuffle(activePlayers);
+    const mid = Math.ceil(shuffled.length / 2);
+    const [team1Names, team2Names] = applyGrouping(
+      shuffled.slice(0, mid),
+      shuffled.slice(mid),
+    );
 
-    const team1Names = shuffle(playersA);
-    const team2Names = shuffle(playersB);
     const team1 =
       (shouldAvoid && assignRolesAvoiding(team1Names, previousRoles)) ||
       assignRoles(team1Names);
@@ -310,25 +342,45 @@ function App({ isAdmin, password }: AppProps) {
     setTeams([team1, team2]);
   };
 
-  const rerollHero = (teamIdx: number, playerIdx: number) => {
+  // Admin reroll: local, replicated via the snapshot/push pipeline.
+  const adminRerollHero = (teamIdx: number, playerIdx: number) => {
     if (!teams) return;
     const newTeams: [Team, Team] = [
       teams[0].map((p) => ({ ...p })),
       teams[1].map((p) => ({ ...p })),
     ];
     const player = newTeams[teamIdx][playerIdx];
-    const excluded = new Set([player.hero]);
-    // Always exclude same-role teammates on the same team
-    newTeams[teamIdx].forEach((p, i) => {
-      if (i !== playerIdx && p.role === player.role) excluded.add(p.hero);
-    });
-    if (uniqueHeroes) {
-      const otherTeam = newTeams[teamIdx === 0 ? 1 : 0];
-      otherTeam.forEach((p) => excluded.add(p.hero));
-    }
-    player.hero = randomHero(player.role, excluded);
+    player.hero = pickRerollHero(newTeams, teamIdx, playerIdx, uniqueHeroes);
     player.rerolled = true;
     setTeams(newTeams);
+  };
+
+  // User self-reroll: client computes the new hero, server validates ownership
+  // and applies the narrow change. State catches up on next poll.
+  const [rerollBusy, setRerollBusy] = useState(false);
+  const selfReroll = async () => {
+    if (!teams || !isUser || !userName || !password) return;
+    let teamIdx = -1;
+    let playerIdx = -1;
+    teams.forEach((team, ti) => {
+      team.forEach((p, pi) => {
+        if (p.name.toLowerCase() === userName.toLowerCase()) {
+          teamIdx = ti;
+          playerIdx = pi;
+        }
+      });
+    });
+    if (teamIdx === -1 || playerIdx === -1) return;
+    if (teams[teamIdx][playerIdx].rerolled) return;
+    const newHero = pickRerollHero(teams, teamIdx, playerIdx, uniqueHeroes);
+    setRerollBusy(true);
+    try {
+      await userReroll(userName, password, newHero);
+    } catch (e) {
+      console.warn("[reroll] failed", e);
+    } finally {
+      setRerollBusy(false);
+    }
   };
 
   const roleLabel = (role: Role) => {
@@ -342,9 +394,29 @@ function App({ isAdmin, password }: AppProps) {
     }
   };
 
+  const activeSet = useMemo(() => new Set(activePlayers), [activePlayers]);
+  const inactiveUsers = useMemo(
+    () => registry.filter((u) => !activeSet.has(u.name)),
+    [registry, activeSet],
+  );
+  const activeUsersFromRegistry = useMemo(
+    () =>
+      activePlayers.map((name) => ({
+        name,
+        registered: registry.some((u) => u.name === name),
+      })),
+    [activePlayers, registry],
+  );
+
   return (
     <div className="layout">
       {!online && <div className="sync-pill">offline</div>}
+      <div className="mode-pill">
+        {gate.mode === "admin" && "ADMIN"}
+        {gate.mode === "user" && `PLAYER · ${userName}`}
+        {gate.mode === "viewer" && "VIEWER"}
+      </div>
+
       <aside className="map-sidebar">
         <h2 className="map-sidebar-title">Maps</h2>
         {isAdmin && (
@@ -389,31 +461,26 @@ function App({ isAdmin, password }: AppProps) {
       <div className="app">
         <h1>OW Team Randomizer</h1>
 
-      <div className="add-teams">
-        <div className="add-team add-team-1">
-          <h3>Team A ({playersA.length}/6)</h3>
-          {isAdmin && (
-            <div className="add-section">
-              <input
-                type="text"
-                placeholder="Add player..."
-                value={inputA}
-                onChange={(e) => setInputA(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addPlayer("A")}
-                maxLength={20}
-              />
-              <button onClick={() => addPlayer("A")} disabled={playersA.length >= 6}>
-                Add
-              </button>
-            </div>
-          )}
-          {playersA.length > 0 && (
+        <div className="active-pool">
+          <h3>
+            Active Players ({activePlayers.length}/{ACTIVE_CAP})
+          </h3>
+          {activePlayers.length === 0 ? (
+            <p className="empty-hint">
+              {isAdmin
+                ? "Add players from the registry below."
+                : "Waiting for admin to set up the lobby."}
+            </p>
+          ) : (
             <ul className="roster-list">
-              {playersA.map((p) => (
-                <li key={p}>
-                  <span>{p}</span>
+              {activeUsersFromRegistry.map(({ name }) => (
+                <li key={name}>
+                  <span>{name}</span>
                   {isAdmin && (
-                    <button className="remove-btn" onClick={() => removePlayer("A", p)}>
+                    <button
+                      className="remove-btn"
+                      onClick={() => removeActive(name)}
+                    >
                       x
                     </button>
                   )}
@@ -423,109 +490,114 @@ function App({ isAdmin, password }: AppProps) {
           )}
         </div>
 
-        <div className="add-team add-team-2">
-          <h3>Team B ({playersB.length}/6)</h3>
-          {isAdmin && (
-            <div className="add-section">
-              <input
-                type="text"
-                placeholder="Add player..."
-                value={inputB}
-                onChange={(e) => setInputB(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addPlayer("B")}
-                maxLength={20}
-              />
-              <button onClick={() => addPlayer("B")} disabled={playersB.length >= 6}>
-                Add
-              </button>
-            </div>
-          )}
-          {playersB.length > 0 && (
-            <ul className="roster-list">
-              {playersB.map((p) => (
-                <li key={p}>
-                  <span>{p}</span>
-                  {isAdmin && (
-                    <button className="remove-btn" onClick={() => removePlayer("B", p)}>
-                      x
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+        <label className="unique-toggle">
+          <input
+            type="checkbox"
+            checked={uniqueHeroes}
+            onChange={(e) => setUniqueHeroes(e.target.checked)}
+            disabled={!isAdmin}
+          />
+          Unique heroes across teams
+        </label>
 
-      <label className="unique-toggle">
-        <input
-          type="checkbox"
-          checked={uniqueHeroes}
-          onChange={(e) => setUniqueHeroes(e.target.checked)}
-          disabled={!isAdmin}
-        />
-        Unique heroes across teams
-      </label>
+        <label className="unique-toggle">
+          <input
+            type="checkbox"
+            checked={avoidPreviousRoles}
+            onChange={(e) => setAvoidPreviousRoles(e.target.checked)}
+            disabled={!isAdmin}
+          />
+          Don't give same role from previous randomization
+        </label>
 
-      <label className="unique-toggle">
-        <input
-          type="checkbox"
-          checked={avoidPreviousRoles}
-          onChange={(e) => setAvoidPreviousRoles(e.target.checked)}
-          disabled={!isAdmin}
-        />
-        Don't give same role from previous randomization
-      </label>
+        {isAdmin && (
+          <div className="action-buttons">
+            <button
+              className="randomize-btn"
+              onClick={randomize}
+              disabled={activePlayers.length < 2}
+            >
+              Randomize Teams
+            </button>
+          </div>
+        )}
 
-      {isAdmin && (
-        <div className="action-buttons">
-          <button
-            className="shuffle-btn"
-            onClick={shufflePlayers}
-            disabled={playersA.length + playersB.length < 2}
-          >
-            Shuffle Players
-          </button>
-          <button
-            className="randomize-btn"
-            onClick={randomize}
-            disabled={playersA.length === 0 || playersB.length === 0}
-          >
-            Randomize Teams
-          </button>
-        </div>
-      )}
+        {teams && (
+          <div className="teams">
+            {teams.map((team, ti) => (
+              <div className={`team team-${ti + 1}`} key={ti}>
+                <h2>Team {ti === 0 ? "A" : "B"}</h2>
+                <ul>
+                  {team.map((player, pi) => {
+                    const isMine =
+                      isUser &&
+                      userName &&
+                      player.name.toLowerCase() === userName.toLowerCase();
+                    const showReroll = isAdmin || isMine;
+                    return (
+                      <li key={pi}>
+                        <span className={`role-badge role-${player.role}`}>
+                          {roleLabel(player.role)}
+                        </span>
+                        <span className="player-name">{player.name}</span>
+                        <span className="hero-name">{player.hero}</span>
+                        {showReroll && (
+                          <button
+                            className={`reroll-btn ${player.rerolled ? "reroll-used" : ""}`}
+                            onClick={
+                              isAdmin
+                                ? () => adminRerollHero(ti, pi)
+                                : () => void selfReroll()
+                            }
+                            disabled={player.rerolled || rerollBusy}
+                            title={
+                              player.rerolled ? "Already rerolled" : "Reroll hero"
+                            }
+                          >
+                            Reroll
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {teams && (
-        <div className="teams">
-          {teams.map((team, ti) => (
-            <div className={`team team-${ti + 1}`} key={ti}>
-              <h2>Team {ti === 0 ? "A" : "B"}</h2>
-              <ul>
-                {team.map((player, pi) => (
-                  <li key={pi}>
-                    <span className={`role-badge role-${player.role}`}>
-                      {roleLabel(player.role)}
+        {isAdmin && (
+          <div className="user-registry">
+            <h3>Registered Users ({registry.length})</h3>
+            {registry.length === 0 ? (
+              <p className="empty-hint">No registrations yet.</p>
+            ) : (
+              <ul className="registry-list">
+                {activePlayers.map((name) => (
+                  <li key={`active-${name}`} className="registry-active">
+                    <span className="registry-badge">ACTIVE</span>
+                    <span className="registry-name">{name}</span>
+                    <button onClick={() => removeActive(name)}>Remove</button>
+                  </li>
+                ))}
+                {inactiveUsers.map((u) => (
+                  <li key={`inactive-${u.name}`} className="registry-inactive">
+                    <span className="registry-badge registry-badge-off">
+                      INACTIVE
                     </span>
-                    <span className="player-name">{player.name}</span>
-                    <span className="hero-name">{player.hero}</span>
-                    {isAdmin && (
-                      <button
-                        className={`reroll-btn ${player.rerolled ? "reroll-used" : ""}`}
-                        onClick={() => rerollHero(ti, pi)}
-                        disabled={player.rerolled}
-                        title={player.rerolled ? "Already rerolled" : "Reroll hero"}
-                      >
-                        Reroll
-                      </button>
-                    )}
+                    <span className="registry-name">{u.name}</span>
+                    <button
+                      onClick={() => addActive(u.name)}
+                      disabled={activePlayers.length >= ACTIVE_CAP}
+                    >
+                      Add
+                    </button>
                   </li>
                 ))}
               </ul>
-            </div>
-          ))}
-        </div>
-      )}
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

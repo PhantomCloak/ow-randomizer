@@ -13,8 +13,7 @@ export interface Player {
 export type Team = Player[];
 
 export type SharedState = {
-  playersA: string[];
-  playersB: string[];
+  activePlayers: string[];
   teams: [Team, Team] | null;
   uniqueHeroes: boolean;
   avoidPreviousRoles: boolean;
@@ -27,22 +26,63 @@ export function isSharedState(v: unknown): v is SharedState {
   return (
     !!v &&
     typeof v === "object" &&
-    Array.isArray((v as SharedState).playersA) &&
-    Array.isArray((v as SharedState).playersB) &&
+    Array.isArray((v as SharedState).activePlayers) &&
     Array.isArray((v as SharedState).selectedMaps)
   );
 }
 
+export type RegisteredUser = { name: string; createdAt: string };
+
+export async function loginOrRegister(
+  name: string,
+  password: string,
+): Promise<"registered" | "ok"> {
+  if (!supabase) throw new Error("auth unavailable");
+  const { data, error } = await supabase.rpc("login_or_register", {
+    p_name: name,
+    p_password: password,
+  });
+  if (error) throw error;
+  return data === "registered" ? "registered" : "ok";
+}
+
+export async function listUsers(adminPassword: string): Promise<RegisteredUser[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("list_users", {
+    p_password: adminPassword,
+  });
+  if (error) throw error;
+  if (!Array.isArray(data)) return [];
+  return data.map((row) => ({
+    name: String(row.name),
+    createdAt: String(row.created_at),
+  }));
+}
+
+export async function userReroll(
+  name: string,
+  password: string,
+  newHero: string,
+): Promise<void> {
+  if (!supabase) throw new Error("auth unavailable");
+  const { error } = await supabase.rpc("user_reroll", {
+    p_name: name,
+    p_password: password,
+    p_new_hero: newHero,
+  });
+  if (error) throw error;
+}
+
 type Options = {
   applyRemote: (s: SharedState) => void;
-  isAdmin: boolean;
+  canPush: boolean;
   password: string | null;
   pollMs?: number;
 };
 
 export function useSharedSync({
   applyRemote,
-  isAdmin,
+  canPush,
   password,
   pollMs = 3000,
 }: Options) {
@@ -97,7 +137,7 @@ export function useSharedSync({
   const push = useCallback(
     async (s: SharedState) => {
       const client = supabase;
-      if (!client || !isAdmin || !password) return;
+      if (!client || !canPush || !password) return;
       try {
         const { data, error } = await client.rpc("update_shared_state", {
           p_password: password,
@@ -114,7 +154,7 @@ export function useSharedSync({
         console.warn("[sync] push failed", e);
       }
     },
-    [isAdmin, password],
+    [canPush, password],
   );
 
   return { push, online, ready };
