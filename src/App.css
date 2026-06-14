@@ -528,3 +528,39 @@ h1 {
   margin: 0.75rem 0 0;
   font-size: 0.9rem;
 }
+
+.gate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.password-box .view-only-btn {
+  background: transparent;
+  color: #f77f00;
+  border: 1px solid #f77f00;
+}
+
+.password-box .view-only-btn:hover {
+  background: rgba(247, 127, 0, 0.1);
+}
+
+/* Read-only map items (viewers) */
+.map-item.readonly {
+  cursor: default;
+}
+
+/* Offline indicator */
+.sync-pill {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: #e74c3c;
+  color: #fff;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  z-index: 10;
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tankHeroes, dpsHeroes, supportHeroes } from "./data/heroes";
 import {
   allMaps,
@@ -6,18 +6,8 @@ import {
   categoryOrder,
   mapsByCategory,
 } from "./data/maps";
+import { useSharedSync, type Role, type SharedState, type Team } from "./sync";
 import "./App.css";
-
-type Role = "tank" | "dps" | "support";
-
-interface Player {
-  name: string;
-  role: Role;
-  hero: string;
-  rerolled: boolean;
-}
-
-type Team = Player[];
 
 function getHeroPool(role: Role): string[] {
   switch (role) {
@@ -166,7 +156,9 @@ function assignRolesAvoiding(
   });
 }
 
-function App() {
+type AppProps = { isAdmin: boolean; password: string | null };
+
+function App({ isAdmin, password }: AppProps) {
   const [inputA, setInputA] = useState("");
   const [inputB, setInputB] = useState("");
   const [playersA, setPlayersA] = useState<string[]>([]);
@@ -182,6 +174,69 @@ function App() {
     () => new Set(allMaps),
   );
   const [pickedMap, setPickedMap] = useState<string | null>(null);
+
+  // JSON of the last snapshot we either pushed OR just applied from remote.
+  // The push effect compares against this to skip echoes from applyRemote.
+  const lastSyncedJsonRef = useRef<string>("");
+
+  const snapshot = useMemo<SharedState>(
+    () => ({
+      playersA,
+      playersB,
+      teams,
+      uniqueHeroes,
+      avoidPreviousRoles,
+      previousRoles: Array.from(previousRoles.entries()),
+      selectedMaps: Array.from(selectedMaps),
+      pickedMap,
+    }),
+    [
+      playersA,
+      playersB,
+      teams,
+      uniqueHeroes,
+      avoidPreviousRoles,
+      previousRoles,
+      selectedMaps,
+      pickedMap,
+    ],
+  );
+
+  const applyRemote = useCallback((s: SharedState) => {
+    setPlayersA(s.playersA);
+    setPlayersB(s.playersB);
+    setTeams(s.teams);
+    setUniqueHeroes(s.uniqueHeroes);
+    setAvoidPreviousRoles(s.avoidPreviousRoles);
+    setPreviousRoles(new Map(s.previousRoles));
+    setSelectedMaps(new Set(s.selectedMaps));
+    setPickedMap(s.pickedMap);
+    // Match the shape produced by `snapshot` so the next push effect dedupes.
+    lastSyncedJsonRef.current = JSON.stringify({
+      playersA: s.playersA,
+      playersB: s.playersB,
+      teams: s.teams,
+      uniqueHeroes: s.uniqueHeroes,
+      avoidPreviousRoles: s.avoidPreviousRoles,
+      previousRoles: s.previousRoles,
+      selectedMaps: s.selectedMaps,
+      pickedMap: s.pickedMap,
+    });
+  }, []);
+
+  const { push, online, ready } = useSharedSync({
+    applyRemote,
+    isAdmin,
+    password,
+  });
+
+  useEffect(() => {
+    if (!isAdmin || !ready) return;
+    const json = JSON.stringify(snapshot);
+    if (json === lastSyncedJsonRef.current) return;
+    lastSyncedJsonRef.current = json;
+    void push(snapshot);
+  }, [snapshot, isAdmin, ready, push]);
 
   const toggleMap = (map: string) => {
     setSelectedMaps((prev) => {
@@ -289,15 +344,18 @@ function App() {
 
   return (
     <div className="layout">
+      {!online && <div className="sync-pill">offline</div>}
       <aside className="map-sidebar">
         <h2 className="map-sidebar-title">Maps</h2>
-        <button
-          className="random-map-btn"
-          onClick={randomMap}
-          disabled={selectedMaps.size === 0}
-        >
-          Random Map
-        </button>
+        {isAdmin && (
+          <button
+            className="random-map-btn"
+            onClick={randomMap}
+            disabled={selectedMaps.size === 0}
+          >
+            Random Map
+          </button>
+        )}
         {pickedMap && (
           <div className="picked-map">
             <span className="picked-map-label">Picked</span>
@@ -315,8 +373,8 @@ function App() {
                 return (
                   <li
                     key={map}
-                    className={`map-item ${selected ? "selected" : "deselected"}`}
-                    onClick={() => toggleMap(map)}
+                    className={`map-item ${selected ? "selected" : "deselected"}${isAdmin ? "" : " readonly"}`}
+                    onClick={isAdmin ? () => toggleMap(map) : undefined}
                   >
                     <span className="map-check">{selected ? "✓" : ""}</span>
                     <span className="map-name">{map}</span>
@@ -334,27 +392,31 @@ function App() {
       <div className="add-teams">
         <div className="add-team add-team-1">
           <h3>Team A ({playersA.length}/6)</h3>
-          <div className="add-section">
-            <input
-              type="text"
-              placeholder="Add player..."
-              value={inputA}
-              onChange={(e) => setInputA(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addPlayer("A")}
-              maxLength={20}
-            />
-            <button onClick={() => addPlayer("A")} disabled={playersA.length >= 6}>
-              Add
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="add-section">
+              <input
+                type="text"
+                placeholder="Add player..."
+                value={inputA}
+                onChange={(e) => setInputA(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addPlayer("A")}
+                maxLength={20}
+              />
+              <button onClick={() => addPlayer("A")} disabled={playersA.length >= 6}>
+                Add
+              </button>
+            </div>
+          )}
           {playersA.length > 0 && (
             <ul className="roster-list">
               {playersA.map((p) => (
                 <li key={p}>
                   <span>{p}</span>
-                  <button className="remove-btn" onClick={() => removePlayer("A", p)}>
-                    x
-                  </button>
+                  {isAdmin && (
+                    <button className="remove-btn" onClick={() => removePlayer("A", p)}>
+                      x
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -363,27 +425,31 @@ function App() {
 
         <div className="add-team add-team-2">
           <h3>Team B ({playersB.length}/6)</h3>
-          <div className="add-section">
-            <input
-              type="text"
-              placeholder="Add player..."
-              value={inputB}
-              onChange={(e) => setInputB(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addPlayer("B")}
-              maxLength={20}
-            />
-            <button onClick={() => addPlayer("B")} disabled={playersB.length >= 6}>
-              Add
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="add-section">
+              <input
+                type="text"
+                placeholder="Add player..."
+                value={inputB}
+                onChange={(e) => setInputB(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addPlayer("B")}
+                maxLength={20}
+              />
+              <button onClick={() => addPlayer("B")} disabled={playersB.length >= 6}>
+                Add
+              </button>
+            </div>
+          )}
           {playersB.length > 0 && (
             <ul className="roster-list">
               {playersB.map((p) => (
                 <li key={p}>
                   <span>{p}</span>
-                  <button className="remove-btn" onClick={() => removePlayer("B", p)}>
-                    x
-                  </button>
+                  {isAdmin && (
+                    <button className="remove-btn" onClick={() => removePlayer("B", p)}>
+                      x
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -396,6 +462,7 @@ function App() {
           type="checkbox"
           checked={uniqueHeroes}
           onChange={(e) => setUniqueHeroes(e.target.checked)}
+          disabled={!isAdmin}
         />
         Unique heroes across teams
       </label>
@@ -405,26 +472,29 @@ function App() {
           type="checkbox"
           checked={avoidPreviousRoles}
           onChange={(e) => setAvoidPreviousRoles(e.target.checked)}
+          disabled={!isAdmin}
         />
         Don't give same role from previous randomization
       </label>
 
-      <div className="action-buttons">
-        <button
-          className="shuffle-btn"
-          onClick={shufflePlayers}
-          disabled={playersA.length + playersB.length < 2}
-        >
-          Shuffle Players
-        </button>
-        <button
-          className="randomize-btn"
-          onClick={randomize}
-          disabled={playersA.length === 0 || playersB.length === 0}
-        >
-          Randomize Teams
-        </button>
-      </div>
+      {isAdmin && (
+        <div className="action-buttons">
+          <button
+            className="shuffle-btn"
+            onClick={shufflePlayers}
+            disabled={playersA.length + playersB.length < 2}
+          >
+            Shuffle Players
+          </button>
+          <button
+            className="randomize-btn"
+            onClick={randomize}
+            disabled={playersA.length === 0 || playersB.length === 0}
+          >
+            Randomize Teams
+          </button>
+        </div>
+      )}
 
       {teams && (
         <div className="teams">
@@ -439,14 +509,16 @@ function App() {
                     </span>
                     <span className="player-name">{player.name}</span>
                     <span className="hero-name">{player.hero}</span>
-                    <button
-                      className={`reroll-btn ${player.rerolled ? "reroll-used" : ""}`}
-                      onClick={() => rerollHero(ti, pi)}
-                      disabled={player.rerolled}
-                      title={player.rerolled ? "Already rerolled" : "Reroll hero"}
-                    >
-                      Reroll
-                    </button>
+                    {isAdmin && (
+                      <button
+                        className={`reroll-btn ${player.rerolled ? "reroll-used" : ""}`}
+                        onClick={() => rerollHero(ti, pi)}
+                        disabled={player.rerolled}
+                        title={player.rerolled ? "Already rerolled" : "Reroll hero"}
+                      >
+                        Reroll
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
