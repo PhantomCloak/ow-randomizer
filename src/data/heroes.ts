@@ -36,6 +36,8 @@ export const dpsHeroes = [
   "Venture",
   "Widowmaker",
   "Emre",
+  "Anran",
+  "Vendetta",
   "Sierra"
 ];
 
@@ -51,5 +53,6 @@ export const supportHeroes = [
   "Mercy",
   "Moira",
   "Zenyatta",
-  "Mizuki"
+  "Mizuki",
+  "Kedy"
 ];
