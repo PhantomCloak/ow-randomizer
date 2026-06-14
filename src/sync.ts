@@ -100,6 +100,7 @@ export function useSharedSync({
     const client = supabase;
     if (!client) return;
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const tick = async () => {
       try {
@@ -126,11 +127,27 @@ export function useSharedSync({
       }
     };
 
-    void tick();
-    const id = setInterval(tick, pollMs);
+    const start = () => {
+      if (intervalId !== null) return;
+      void tick();
+      intervalId = setInterval(tick, pollMs);
+    };
+    const stop = () => {
+      if (intervalId === null) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [pollMs]);
 
