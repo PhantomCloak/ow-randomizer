@@ -38,7 +38,8 @@ export const dpsHeroes = [
   "Emre",
   "Anran",
   "Vendetta",
-  "Sierra"
+  "Sierra",
+  "Shinon"
 ];
 
 export const supportHeroes = [
