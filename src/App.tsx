@@ -23,13 +23,60 @@ type Team = Player[];
 // came from. Rounds are numbered locally from 0 on the first randomize.
 type RoleHistory = Map<string, { round: number; role: Role }[]>;
 
-function lastRoles(history: RoleHistory): Map<string, Role> {
-  const last = new Map<string, Role>();
+// Stand-in wait for a role a player has never had, so newcomers outrank
+// anyone waiting on a role they have already had at some point.
+const NEVER_PLAYED = 99;
+
+// Per player: the roles already taken in their current cycle, and how many of
+// their own rounds ago they last had each role (1 means last round).
+interface RoleStats {
+  owed: Map<string, Set<Role>>;
+  waited: Map<string, Map<Role, number>>;
+}
+
+// A cycle collects all three roles and then resets, so nobody repeats a role
+// while one they have not played yet is still open to them.
+function roleStats(history: RoleHistory): RoleStats {
+  const owed = new Map<string, Set<Role>>();
+  const waited = new Map<string, Map<Role, number>>();
   history.forEach((rounds, name) => {
-    const latest = rounds[rounds.length - 1];
-    if (latest) last.set(name, latest.role);
+    let seen = new Set<Role>();
+    for (const { role } of rounds) {
+      // A repeat only happens when the composition left no room to rotate;
+      // start the player on a fresh cycle rather than leaving them stuck.
+      if (seen.has(role)) seen = new Set([role]);
+      else seen.add(role);
+      if (seen.size === ALL_ROLES.length) seen = new Set();
+    }
+    owed.set(name, seen);
+
+    const gaps = new Map<Role, number>();
+    ALL_ROLES.forEach((role) => {
+      let latest = -1;
+      rounds.forEach((entry, i) => {
+        if (entry.role === role) latest = i;
+      });
+      gaps.set(role, latest === -1 ? NEVER_PLAYED : rounds.length - latest);
+    });
+    waited.set(name, gaps);
   });
-  return last;
+  return { owed, waited };
+}
+
+// Slot costs, spaced so a cheaper concern can never outweigh a dearer one
+// across a whole team: never repeat last round's role, then keep everyone
+// cycling, then give a role to whoever has waited longest for it. A team is
+// at most six players, so the wait term stays well under BREAK_CYCLE and the
+// cycle term well under REPEAT_LAST.
+const REPEAT_LAST = 1_000_000;
+const BREAK_CYCLE = 1_000;
+
+function slotCost(stats: RoleStats, name: string, role: Role): number {
+  const gap = stats.waited.get(name)?.get(role) ?? NEVER_PLAYED;
+  let cost = NEVER_PLAYED - Math.min(gap, NEVER_PLAYED);
+  if (stats.owed.get(name)?.has(role)) cost += BREAK_CYCLE;
+  if (gap === 1) cost += REPEAT_LAST;
+  return cost;
 }
 
 function getHeroPool(role: Role): string[] {
@@ -145,12 +192,8 @@ const ROLE_ORDERS: Role[][] = [
   ["tank", "tank", "dps", "dps", "support", "support"],
 ];
 
-// Roles rotate in this order, so nobody repeats the role they just played.
-const CYCLE_NEXT: Record<Role, Role> = {
-  tank: "dps",
-  dps: "support",
-  support: "tank",
-};
+// Every role a cycle has to cover before anyone repeats one.
+const ALL_ROLES: Role[] = ["tank", "dps", "support"];
 
 function getRoleOrder(size: number): Role[] {
   return ROLE_ORDERS[Math.min(size, ROLE_ORDERS.length - 1)];
@@ -167,58 +210,44 @@ function assignRoles(names: string[], excluded?: Set<string>): Team {
   });
 }
 
-// Roles for both teams with no rotation constraint, for when nothing rotates.
-function assignRolesPlain(
-  [namesA, namesB]: [string[], string[]],
-  uniqueHeroes: boolean,
-): [Team, Team] {
-  const teamA = assignRoles(namesA);
-  const heroes = uniqueHeroes ? new Set(teamA.map((p) => p.hero)) : undefined;
-  return [teamA, assignRoles(namesB, heroes)];
-}
-
-// How many re-splits to try before giving up on rotating everyone's role.
+// How many splits to score before taking the best one seen.
 const SPLIT_ATTEMPTS = 50;
 
-function assignRolesAvoiding(
+// Cheapest way to hand this team's slots out, searched exhaustively — a team
+// is at most six players, and pruning on the running cost keeps it quick.
+// Returns the player order lining up with getRoleOrder(), and never fails:
+// where no arrangement can satisfy everyone it yields the least bad one.
+function bestLineup(
   names: string[],
-  previousRoles: Map<string, Role>,
-  excluded?: Set<string>,
-): Team | null {
+  stats: RoleStats,
+): { order: string[]; cost: number } {
   const roles = getRoleOrder(names.length);
-  const assignment: string[] = new Array(roles.length);
+  // Equal-cost lineups are settled by whichever order we walk first, so the
+  // shuffle here is what keeps repeat randomizes from going stale.
+  const pool = shuffle(names);
+  const chosen: string[] = new Array(roles.length);
   const taken = new Set<number>();
+  let best: string[] | null = null;
+  let bestCost = Infinity;
 
-  const tryFill = (slot: number): boolean => {
-    if (slot === roles.length) return true;
-    const role = roles[slot];
-    const open = shuffle(names.map((_, i) => i).filter((i) => !taken.has(i)));
-    // Players whose rotation lands on this role get first refusal, so roles
-    // advance tank -> dps -> support -> tank whenever the composition allows.
-    const onCycle = (i: number) => {
-      const prev = previousRoles.get(names[i]);
-      return prev !== undefined && CYCLE_NEXT[prev] === role;
-    };
-    const candidates = [...open.filter(onCycle), ...open.filter((i) => !onCycle(i))];
-    for (const i of candidates) {
-      if (previousRoles.get(names[i]) === role) continue;
+  const walk = (slot: number, cost: number) => {
+    if (cost >= bestCost) return;
+    if (slot === roles.length) {
+      bestCost = cost;
+      best = [...chosen];
+      return;
+    }
+    for (let i = 0; i < pool.length; i++) {
+      if (taken.has(i)) continue;
       taken.add(i);
-      assignment[slot] = names[i];
-      if (tryFill(slot + 1)) return true;
+      chosen[slot] = pool[i];
+      walk(slot + 1, cost + slotCost(stats, pool[i], roles[slot]));
       taken.delete(i);
     }
-    return false;
   };
+  walk(0, 0);
 
-  if (!tryFill(0)) return null;
-
-  const used = new Set(excluded);
-  return assignment.map((name, i) => {
-    const role = roles[i];
-    const hero = randomHero(role, used);
-    used.add(hero);
-    return { name, role, hero, rerolled: false };
-  });
+  return { order: best ?? pool.slice(0, roles.length), cost: bestCost };
 }
 
 function App() {
@@ -279,26 +308,31 @@ function App() {
     const everyone = [...playersA, ...playersB];
     if (everyone.length < 2) return;
 
-    const previousRoles = lastRoles(roleHistory);
+    const stats = roleStats(roleHistory);
     let split = splitTeams(everyone);
-    let rotated: [Team, Team] | null = null;
+    let orders: [string[], string[]] = [split[0], split[1]];
+    let bestCost = Infinity;
 
-    // A split can leave someone stuck with their previous role (e.g. the only
-    // tank slot belongs to last round's tank), so re-split until one rotates.
-    for (let attempt = 0; attempt < SPLIT_ATTEMPTS && !rotated; attempt++) {
-      if (attempt > 0) split = splitTeams(everyone);
-      const team1 = assignRolesAvoiding(split[0], previousRoles);
-      if (!team1) continue;
-      const team1Heroes = uniqueHeroes
-        ? new Set(team1.map((p) => p.hero))
-        : undefined;
-      const team2 = assignRolesAvoiding(split[1], previousRoles, team1Heroes);
-      if (team2) rotated = [team1, team2];
+    // Which team a player lands on decides which slots they can reach, so
+    // score several splits and keep the best instead of taking the first that
+    // fits. A 5v5 has one tank slot per team against two of everything else,
+    // so it can never rotate all ten — this shorts the fewest players.
+    for (let attempt = 0; attempt < SPLIT_ATTEMPTS; attempt++) {
+      const candidate = attempt === 0 ? split : splitTeams(everyone);
+      const a = bestLineup(candidate[0], stats);
+      const b = bestLineup(candidate[1], stats);
+      if (a.cost + b.cost < bestCost) {
+        bestCost = a.cost + b.cost;
+        split = candidate;
+        orders = [a.order, b.order];
+      }
     }
 
-    // No split can rotate everyone (too few players for the role slots) — fall
-    // back to plain random roles rather than refusing to randomize.
-    const [team1, team2] = rotated ?? assignRolesPlain(split, uniqueHeroes);
+    const team1 = assignRoles(orders[0]);
+    const team1Heroes = uniqueHeroes
+      ? new Set(team1.map((p) => p.hero))
+      : undefined;
+    const team2 = assignRoles(orders[1], team1Heroes);
 
     const nextHistory: RoleHistory = new Map(roleHistory);
     [...team1, ...team2].forEach((p) => {
