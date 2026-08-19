@@ -19,6 +19,19 @@ interface Player {
 
 type Team = Player[];
 
+// Every role a player has been handed, oldest first, tagged with the round it
+// came from. Rounds are numbered locally from 0 on the first randomize.
+type RoleHistory = Map<string, { round: number; role: Role }[]>;
+
+function lastRoles(history: RoleHistory): Map<string, Role> {
+  const last = new Map<string, Role>();
+  history.forEach((rounds, name) => {
+    const latest = rounds[rounds.length - 1];
+    if (latest) last.set(name, latest.role);
+  });
+  return last;
+}
+
 function getHeroPool(role: Role): string[] {
   switch (role) {
     case "tank":
@@ -112,11 +125,35 @@ function applyGrouping(teamA: string[], teamB: string[]): [string[], string[]] {
   return [a, b];
 }
 
-const ROLE_ORDER_5: Role[] = ["tank", "dps", "dps", "support", "support"];
-const ROLE_ORDER_6: Role[] = ["tank", "tank", "dps", "dps", "support", "support"];
+// Reshuffles everyone across both teams, honouring grouping preferences.
+function splitTeams(names: string[]): [string[], string[]] {
+  const all = shuffle(names);
+  const mid = Math.ceil(all.length / 2);
+  return applyGrouping(all.slice(0, mid), all.slice(mid));
+}
+
+// One tank per team, two once a team reaches six. Short teams keep one of each
+// role rather than truncating the six-slot order, so everyone still has a role
+// to rotate into.
+const ROLE_ORDERS: Role[][] = [
+  [],
+  ["tank"],
+  ["tank", "dps"],
+  ["tank", "dps", "support"],
+  ["tank", "dps", "dps", "support"],
+  ["tank", "dps", "dps", "support", "support"],
+  ["tank", "tank", "dps", "dps", "support", "support"],
+];
+
+// Roles rotate in this order, so nobody repeats the role they just played.
+const CYCLE_NEXT: Record<Role, Role> = {
+  tank: "dps",
+  dps: "support",
+  support: "tank",
+};
 
 function getRoleOrder(size: number): Role[] {
-  return size >= 6 ? ROLE_ORDER_6 : ROLE_ORDER_5;
+  return ROLE_ORDERS[Math.min(size, ROLE_ORDERS.length - 1)];
 }
 
 function assignRoles(names: string[], excluded?: Set<string>): Team {
@@ -130,6 +167,19 @@ function assignRoles(names: string[], excluded?: Set<string>): Team {
   });
 }
 
+// Roles for both teams with no rotation constraint, for when nothing rotates.
+function assignRolesPlain(
+  [namesA, namesB]: [string[], string[]],
+  uniqueHeroes: boolean,
+): [Team, Team] {
+  const teamA = assignRoles(namesA);
+  const heroes = uniqueHeroes ? new Set(teamA.map((p) => p.hero)) : undefined;
+  return [teamA, assignRoles(namesB, heroes)];
+}
+
+// How many re-splits to try before giving up on rotating everyone's role.
+const SPLIT_ATTEMPTS = 50;
+
 function assignRolesAvoiding(
   names: string[],
   previousRoles: Map<string, Role>,
@@ -142,9 +192,14 @@ function assignRolesAvoiding(
   const tryFill = (slot: number): boolean => {
     if (slot === roles.length) return true;
     const role = roles[slot];
-    const candidates = shuffle(
-      names.map((_, i) => i).filter((i) => !taken.has(i)),
-    );
+    const open = shuffle(names.map((_, i) => i).filter((i) => !taken.has(i)));
+    // Players whose rotation lands on this role get first refusal, so roles
+    // advance tank -> dps -> support -> tank whenever the composition allows.
+    const onCycle = (i: number) => {
+      const prev = previousRoles.get(names[i]);
+      return prev !== undefined && CYCLE_NEXT[prev] === role;
+    };
+    const candidates = [...open.filter(onCycle), ...open.filter((i) => !onCycle(i))];
     for (const i of candidates) {
       if (previousRoles.get(names[i]) === role) continue;
       taken.add(i);
@@ -173,10 +228,9 @@ function App() {
   const [playersB, setPlayersB] = useState<string[]>([]);
   const [teams, setTeams] = useState<[Team, Team] | null>(null);
   const [uniqueHeroes, setUniqueHeroes] = useState(false);
-  const [avoidPreviousRoles, setAvoidPreviousRoles] = useState(false);
-  const [previousRoles, setPreviousRoles] = useState<Map<string, Role>>(
-    new Map(),
-  );
+  const [roleHistory, setRoleHistory] = useState<RoleHistory>(new Map());
+  // Number the next randomize will produce; the first round is 0.
+  const [round, setRound] = useState(0);
   // Maps start fully selected; deselecting removes them from the random pool.
   const [selectedMaps, setSelectedMaps] = useState<Set<string>>(
     () => new Set(allMaps),
@@ -221,37 +275,42 @@ function App() {
     setTeams(null);
   };
 
-  const shufflePlayers = () => {
-    const all = shuffle([...playersA, ...playersB]);
-    const mid = Math.ceil(all.length / 2);
-    const [a, b] = applyGrouping(all.slice(0, mid), all.slice(mid));
-    setPlayersA(a);
-    setPlayersB(b);
-    setTeams(null);
-  };
-
   const randomize = () => {
-    if (playersA.length === 0 || playersB.length === 0) return;
+    const everyone = [...playersA, ...playersB];
+    if (everyone.length < 2) return;
 
-    const shouldAvoid = avoidPreviousRoles && previousRoles.size > 0;
+    const previousRoles = lastRoles(roleHistory);
+    let split = splitTeams(everyone);
+    let rotated: [Team, Team] | null = null;
 
-    const team1Names = shuffle(playersA);
-    const team2Names = shuffle(playersB);
-    const team1 =
-      (shouldAvoid && assignRolesAvoiding(team1Names, previousRoles)) ||
-      assignRoles(team1Names);
-    const team1Heroes = uniqueHeroes
-      ? new Set(team1.map((p) => p.hero))
-      : undefined;
-    const team2 =
-      (shouldAvoid &&
-        assignRolesAvoiding(team2Names, previousRoles, team1Heroes)) ||
-      assignRoles(team2Names, team1Heroes);
+    // A split can leave someone stuck with their previous role (e.g. the only
+    // tank slot belongs to last round's tank), so re-split until one rotates.
+    for (let attempt = 0; attempt < SPLIT_ATTEMPTS && !rotated; attempt++) {
+      if (attempt > 0) split = splitTeams(everyone);
+      const team1 = assignRolesAvoiding(split[0], previousRoles);
+      if (!team1) continue;
+      const team1Heroes = uniqueHeroes
+        ? new Set(team1.map((p) => p.hero))
+        : undefined;
+      const team2 = assignRolesAvoiding(split[1], previousRoles, team1Heroes);
+      if (team2) rotated = [team1, team2];
+    }
 
-    const nextRoles = new Map<string, Role>();
-    team1.forEach((p) => nextRoles.set(p.name, p.role));
-    team2.forEach((p) => nextRoles.set(p.name, p.role));
-    setPreviousRoles(nextRoles);
+    // No split can rotate everyone (too few players for the role slots) — fall
+    // back to plain random roles rather than refusing to randomize.
+    const [team1, team2] = rotated ?? assignRolesPlain(split, uniqueHeroes);
+
+    const nextHistory: RoleHistory = new Map(roleHistory);
+    [...team1, ...team2].forEach((p) => {
+      nextHistory.set(p.name, [
+        ...(nextHistory.get(p.name) ?? []),
+        { round, role: p.role },
+      ]);
+    });
+    setRoleHistory(nextHistory);
+    setRound(round + 1);
+    setPlayersA(split[0]);
+    setPlayersB(split[1]);
     setTeams([team1, team2]);
   };
 
@@ -400,27 +459,11 @@ function App() {
         Unique heroes across teams
       </label>
 
-      <label className="unique-toggle">
-        <input
-          type="checkbox"
-          checked={avoidPreviousRoles}
-          onChange={(e) => setAvoidPreviousRoles(e.target.checked)}
-        />
-        Don't give same role from previous randomization
-      </label>
-
       <div className="action-buttons">
-        <button
-          className="shuffle-btn"
-          onClick={shufflePlayers}
-          disabled={playersA.length + playersB.length < 2}
-        >
-          Shuffle Players
-        </button>
         <button
           className="randomize-btn"
           onClick={randomize}
-          disabled={playersA.length === 0 || playersB.length === 0}
+          disabled={playersA.length + playersB.length < 2}
         >
           Randomize Teams
         </button>
@@ -430,14 +473,34 @@ function App() {
         <div className="teams">
           {teams.map((team, ti) => (
             <div className={`team team-${ti + 1}`} key={ti}>
-              <h2>Team {ti === 0 ? "A" : "B"}</h2>
+              <h2>
+                Team {ti === 0 ? "A" : "B"}
+                <span className="round-label">Round {round - 1}</span>
+              </h2>
               <ul>
                 {team.map((player, pi) => (
                   <li key={pi}>
                     <span className={`role-badge role-${player.role}`}>
                       {roleLabel(player.role)}
                     </span>
-                    <span className="player-name">{player.name}</span>
+                    <span className="player-name" tabIndex={0}>
+                      {player.name}
+                      <span className="role-history">
+                        <span className="role-history-title">Role history</span>
+                        {(roleHistory.get(player.name) ?? []).map((entry) => (
+                          <span className="role-history-row" key={entry.round}>
+                            <span className="role-history-round">
+                              R{entry.round}
+                            </span>
+                            <span
+                              className={`role-badge role-${entry.role}`}
+                            >
+                              {roleLabel(entry.role)}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    </span>
                     <span className="hero-name">{player.hero}</span>
                     <button
                       className={`reroll-btn ${player.rerolled ? "reroll-used" : ""}`}

@@ -146,7 +146,6 @@ h1 {
   margin-bottom: 2rem;
 }
 
-.shuffle-btn,
 .randomize-btn {
   padding: 0.8rem 2rem;
   border: none;
@@ -157,24 +156,14 @@ h1 {
   text-transform: uppercase;
   letter-spacing: 1px;
   transition: transform 0.1s, opacity 0.2s;
-}
-
-.randomize-btn {
   background: #f77f00;
   color: #1a1a2e;
 }
 
-.shuffle-btn {
-  background: #3498db;
-  color: #fff;
-}
-
-.shuffle-btn:hover:not(:disabled),
 .randomize-btn:hover:not(:disabled) {
   transform: scale(1.05);
 }
 
-.shuffle-btn:disabled,
 .randomize-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -262,6 +251,64 @@ h1 {
   font-weight: 600;
   flex: 1;
   text-align: left;
+  position: relative;
+  cursor: help;
+}
+
+.round-label {
+  margin-left: 0.5rem;
+  color: #888;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* Role history overlay, revealed on hover/focus of a player name */
+.role-history {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 10;
+  min-width: 8rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  background: #1a1a2e;
+  border: 1px solid #2f4a7a;
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.player-name:hover .role-history,
+.player-name:focus-visible .role-history {
+  display: flex;
+}
+
+.role-history-title {
+  color: #888;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 0.1rem;
+}
+
+.role-history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.role-history-round {
+  color: #aaa;
+  font-size: 0.75rem;
+  font-weight: 700;
+  min-width: 2rem;
 }
 
 .hero-name {
