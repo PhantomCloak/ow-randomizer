@@ -20,8 +20,9 @@ interface Player {
 type Team = Player[];
 
 // Every role a player has been handed, oldest first, tagged with the round it
-// came from. Rounds are numbered locally from 0 on the first randomize.
-type RoleHistory = Map<string, { round: number; role: Role }[]>;
+// came from and the hero that came with it. Rounds are numbered locally from 0
+// on the first randomize.
+type RoleHistory = Map<string, { round: number; role: Role; hero: string }[]>;
 
 // Stand-in wait for a role a player has never had, so newcomers outrank
 // anyone waiting on a role they have already had at some point.
@@ -90,15 +91,40 @@ function getHeroPool(role: Role): string[] {
   }
 }
 
-function randomHero(role: Role, excluded?: Set<string>): string {
+// How many of a player's own turns at a role a hero stays on cooldown for.
+// Held well under the smallest pool (12 supports) so a draw never runs dry.
+const HERO_COOLDOWN = 4;
+
+// The heroes a player was handed in their last HERO_COOLDOWN turns at this
+// role. Only same-role turns count: the three pools are disjoint, so a hero
+// can only ever collide with itself.
+function recentHeroes(
+  history: RoleHistory,
+  name: string,
+  role: Role,
+): Set<string> {
+  const turns = (history.get(name) ?? []).filter((e) => e.role === role);
+  return new Set(turns.slice(-HERO_COOLDOWN).map((e) => e.hero));
+}
+
+// `excluded` is honoured wherever the pool allows it. `cooling` is only a
+// preference and is the first thing dropped when nothing else is left, so a
+// draw always returns a hero.
+function randomHero(
+  role: Role,
+  excluded?: Set<string>,
+  cooling?: Set<string>,
+): string {
   const pool = getHeroPool(role);
-  if (excluded && excluded.size > 0) {
-    const available = pool.filter((h) => !excluded.has(h));
-    if (available.length > 0) {
-      return available[Math.floor(Math.random() * available.length)];
-    }
+  const pick = (from: string[]) =>
+    from[Math.floor(Math.random() * from.length)];
+  const available =
+    excluded && excluded.size > 0 ? pool.filter((h) => !excluded.has(h)) : pool;
+  if (cooling && cooling.size > 0) {
+    const fresh = available.filter((h) => !cooling.has(h));
+    if (fresh.length > 0) return pick(fresh);
   }
-  return pool[Math.floor(Math.random() * pool.length)];
+  return pick(available.length > 0 ? available : pool);
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -199,12 +225,19 @@ function getRoleOrder(size: number): Role[] {
   return ROLE_ORDERS[Math.min(size, ROLE_ORDERS.length - 1)];
 }
 
-function assignRoles(names: string[], excluded?: Set<string>): Team {
+// `history` is passed only while the avoid-recent flag is on; without it the
+// draw is the plain uniform pick it has always been.
+function assignRoles(
+  names: string[],
+  excluded?: Set<string>,
+  history?: RoleHistory,
+): Team {
   const used = new Set(excluded);
   const roles = getRoleOrder(names.length);
   return names.map((name, i) => {
     const role = roles[i];
-    const hero = randomHero(role, used);
+    const cooling = history && recentHeroes(history, name, role);
+    const hero = randomHero(role, used, cooling);
     used.add(hero);
     return { name, role, hero, rerolled: false };
   });
@@ -257,6 +290,8 @@ function App() {
   const [playersB, setPlayersB] = useState<string[]>([]);
   const [teams, setTeams] = useState<[Team, Team] | null>(null);
   const [uniqueHeroes, setUniqueHeroes] = useState(false);
+  // Off by default: hero draws stay memoryless unless this is switched on.
+  const [avoidRecent, setAvoidRecent] = useState(false);
   const [roleHistory, setRoleHistory] = useState<RoleHistory>(new Map());
   // Number the next randomize will produce; the first round is 0.
   const [round, setRound] = useState(0);
@@ -328,17 +363,18 @@ function App() {
       }
     }
 
-    const team1 = assignRoles(orders[0]);
+    const memory = avoidRecent ? roleHistory : undefined;
+    const team1 = assignRoles(orders[0], undefined, memory);
     const team1Heroes = uniqueHeroes
       ? new Set(team1.map((p) => p.hero))
       : undefined;
-    const team2 = assignRoles(orders[1], team1Heroes);
+    const team2 = assignRoles(orders[1], team1Heroes, memory);
 
     const nextHistory: RoleHistory = new Map(roleHistory);
     [...team1, ...team2].forEach((p) => {
       nextHistory.set(p.name, [
         ...(nextHistory.get(p.name) ?? []),
-        { round, role: p.role },
+        { round, role: p.role, hero: p.hero },
       ]);
     });
     setRoleHistory(nextHistory);
@@ -364,9 +400,29 @@ function App() {
       const otherTeam = newTeams[teamIdx === 0 ? 1 : 0];
       otherTeam.forEach((p) => excluded.add(p.hero));
     }
-    player.hero = randomHero(player.role, excluded);
+    player.hero = randomHero(
+      player.role,
+      excluded,
+      avoidRecent
+        ? recentHeroes(roleHistory, player.name, player.role)
+        : undefined,
+    );
     player.rerolled = true;
     setTeams(newTeams);
+    // Keep the history honest: this round's entry becomes the rerolled hero, so
+    // later cooldowns look at what the player actually played.
+    setRoleHistory((prev) => {
+      const next = new Map(prev);
+      const entries = next.get(player.name);
+      if (entries?.length) {
+        const last = entries[entries.length - 1];
+        next.set(player.name, [
+          ...entries.slice(0, -1),
+          { ...last, hero: player.hero },
+        ]);
+      }
+      return next;
+    });
   };
 
   const roleLabel = (role: Role) => {
@@ -484,14 +540,24 @@ function App() {
         </div>
       </div>
 
-      <label className="unique-toggle">
-        <input
-          type="checkbox"
-          checked={uniqueHeroes}
-          onChange={(e) => setUniqueHeroes(e.target.checked)}
-        />
-        Unique heroes across teams
-      </label>
+      <div className="toggles">
+        <label className="unique-toggle">
+          <input
+            type="checkbox"
+            checked={uniqueHeroes}
+            onChange={(e) => setUniqueHeroes(e.target.checked)}
+          />
+          Unique heroes across teams
+        </label>
+        <label className="unique-toggle">
+          <input
+            type="checkbox"
+            checked={avoidRecent}
+            onChange={(e) => setAvoidRecent(e.target.checked)}
+          />
+          Avoid each player's last {HERO_COOLDOWN} heroes per role
+        </label>
+      </div>
 
       <div className="action-buttons">
         <button
