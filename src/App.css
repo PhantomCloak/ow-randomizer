@@ -119,6 +119,59 @@ h1 {
   padding: 0 0.3rem;
 }
 
+/* Preferred role picker */
+.roster-name {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pref-picker {
+  display: flex;
+  gap: 0.25rem;
+  margin-right: 0.4rem;
+}
+
+.pref-btn {
+  border: none;
+  cursor: pointer;
+  min-width: 34px;
+  padding: 0.15rem 0.35rem;
+  font-family: inherit;
+  opacity: 0.32;
+  filter: grayscale(1);
+  transition: opacity 0.15s, filter 0.15s;
+}
+
+.pref-btn:hover {
+  opacity: 0.7;
+  filter: grayscale(0.3);
+}
+
+.pref-btn.active {
+  opacity: 1;
+  filter: none;
+  outline: 1px solid #f77f00;
+  outline-offset: 1px;
+}
+
+.pref-warning {
+  color: #e8a33d;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+.pref-missed {
+  color: #888;
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-left: 0.4rem;
+  white-space: nowrap;
+}
+
 /* Unique heroes toggle */
 .toggles {
   display: flex;
@@ -358,6 +411,18 @@ h1 {
   .add-teams,
   .teams {
     grid-template-columns: 1fr;
+  }
+
+  .roster-list li {
+    flex-wrap: wrap;
+  }
+
+  .roster-name {
+    flex: 1 0 60%;
+  }
+
+  .pref-picker {
+    margin: 0.3rem 0 0;
   }
 }
 

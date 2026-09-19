@@ -10,6 +10,10 @@ import "./App.css";
 
 type Role = "tank" | "dps" | "support";
 
+// A player's standing request for a role. A name absent from the map has no
+// preference, so an empty map leaves every cost below exactly as it was.
+type RolePrefs = Map<string, Role>;
+
 interface Player {
   name: string;
   role: Role;
@@ -71,12 +75,25 @@ function roleStats(history: RoleHistory): RoleStats {
 // cycle term well under REPEAT_LAST.
 const REPEAT_LAST = 1_000_000;
 const BREAK_CYCLE = 1_000;
+// Denying a preferred role outranks every rotation concern put together: a whole
+// six-slot team of REPEAT_LAST misses is still far cheaper than a single one of
+// these, so a player who asks for a role keeps it however long they hold it.
+const MISS_PREFERENCE = 1_000_000_000;
 
-function slotCost(stats: RoleStats, name: string, role: Role): number {
+// `prefs` is passed only while preferred roles are on; without it the cost is
+// the rotation-only score it has always been.
+function slotCost(
+  stats: RoleStats,
+  name: string,
+  role: Role,
+  prefs?: RolePrefs,
+): number {
   const gap = stats.waited.get(name)?.get(role) ?? NEVER_PLAYED;
   let cost = NEVER_PLAYED - Math.min(gap, NEVER_PLAYED);
   if (stats.owed.get(name)?.has(role)) cost += BREAK_CYCLE;
   if (gap === 1) cost += REPEAT_LAST;
+  const wanted = prefs?.get(name);
+  if (wanted && wanted !== role) cost += MISS_PREFERENCE;
   return cost;
 }
 
@@ -253,6 +270,7 @@ const SPLIT_ATTEMPTS = 50;
 function bestLineup(
   names: string[],
   stats: RoleStats,
+  prefs?: RolePrefs,
 ): { order: string[]; cost: number } {
   const roles = getRoleOrder(names.length);
   // Equal-cost lineups are settled by whichever order we walk first, so the
@@ -274,13 +292,66 @@ function bestLineup(
       if (taken.has(i)) continue;
       taken.add(i);
       chosen[slot] = pool[i];
-      walk(slot + 1, cost + slotCost(stats, pool[i], roles[slot]));
+      walk(slot + 1, cost + slotCost(stats, pool[i], roles[slot], prefs));
       taken.delete(i);
     }
   };
   walk(0, 0);
 
   return { order: best ?? pool.slice(0, roles.length), cost: bestCost };
+}
+
+function roleLabel(role: Role): string {
+  switch (role) {
+    case "tank":
+      return "TANK";
+    case "dps":
+      return "DPS";
+    case "support":
+      return "SUP";
+  }
+}
+
+// How many slots each role has once a pool of this size is split. splitTeams
+// always cuts at the midpoint, so the sizes — and with them the slots — are
+// known before anyone is shuffled.
+function roleCapacity(total: number): Map<Role, number> {
+  const slots = new Map<Role, number>(ALL_ROLES.map((r) => [r, 0]));
+  const sizeA = Math.ceil(total / 2);
+  [...getRoleOrder(sizeA), ...getRoleOrder(total - sizeA)].forEach((role) =>
+    slots.set(role, (slots.get(role) ?? 0) + 1),
+  );
+  return slots;
+}
+
+// The three role badges, one lit when the player has asked for that role.
+// Clicking the lit badge clears the request.
+function RolePicker({
+  value,
+  onPick,
+}: {
+  value?: Role;
+  onPick: (role: Role) => void;
+}) {
+  return (
+    <span className="pref-picker">
+      {ALL_ROLES.map((role) => {
+        const active = value === role;
+        return (
+          <button
+            key={role}
+            type="button"
+            className={`role-badge role-${role} pref-btn ${active ? "active" : ""}`}
+            onClick={() => onPick(role)}
+            title={active ? "Clear preferred role" : `Prefer ${roleLabel(role)}`}
+            aria-pressed={active}
+          >
+            {roleLabel(role)}
+          </button>
+        );
+      })}
+    </span>
+  );
 }
 
 function App() {
@@ -290,6 +361,11 @@ function App() {
   const [playersB, setPlayersB] = useState<string[]>([]);
   const [teams, setTeams] = useState<[Team, Team] | null>(null);
   const [uniqueHeroes, setUniqueHeroes] = useState(false);
+  // Preferred roles: names absent from the map are on "any", so an untouched
+  // pool randomizes exactly as it did before the feature existed.
+  const [rolePrefs, setRolePrefs] = useState<RolePrefs>(new Map());
+  // Lets a round ignore every request without anyone losing their pick.
+  const [usePrefs, setUsePrefs] = useState(true);
   // Off by default: hero draws stay memoryless unless this is switched on.
   const [avoidRecent, setAvoidRecent] = useState(false);
   const [roleHistory, setRoleHistory] = useState<RoleHistory>(new Map());
@@ -330,12 +406,28 @@ function App() {
     }
   };
 
+  // Picking the role a player already asked for clears the request.
+  const togglePref = (name: string, role: Role) => {
+    setRolePrefs((prev) => {
+      const next = new Map(prev);
+      if (next.get(name) === role) next.delete(name);
+      else next.set(name, role);
+      return next;
+    });
+  };
+
   const removePlayer = (team: "A" | "B", name: string) => {
     if (team === "A") {
       setPlayersA(playersA.filter((p) => p !== name));
     } else {
       setPlayersB(playersB.filter((p) => p !== name));
     }
+    setRolePrefs((prev) => {
+      if (!prev.has(name)) return prev;
+      const next = new Map(prev);
+      next.delete(name);
+      return next;
+    });
     setTeams(null);
   };
 
@@ -344,6 +436,7 @@ function App() {
     if (everyone.length < 2) return;
 
     const stats = roleStats(roleHistory);
+    const prefs = usePrefs && rolePrefs.size > 0 ? rolePrefs : undefined;
     let split = splitTeams(everyone);
     let orders: [string[], string[]] = [split[0], split[1]];
     let bestCost = Infinity;
@@ -354,8 +447,8 @@ function App() {
     // so it can never rotate all ten — this shorts the fewest players.
     for (let attempt = 0; attempt < SPLIT_ATTEMPTS; attempt++) {
       const candidate = attempt === 0 ? split : splitTeams(everyone);
-      const a = bestLineup(candidate[0], stats);
-      const b = bestLineup(candidate[1], stats);
+      const a = bestLineup(candidate[0], stats, prefs);
+      const b = bestLineup(candidate[1], stats, prefs);
       if (a.cost + b.cost < bestCost) {
         bestCost = a.cost + b.cost;
         split = candidate;
@@ -425,16 +518,17 @@ function App() {
     });
   };
 
-  const roleLabel = (role: Role) => {
-    switch (role) {
-      case "tank":
-        return "TANK";
-      case "dps":
-        return "DPS";
-      case "support":
-        return "SUP";
-    }
-  };
+  // Requests that the composition cannot serve, so it is clear up front why
+  // somebody will be handed a role they did not ask for.
+  const poolSize = playersA.length + playersB.length;
+  const slots = roleCapacity(poolSize);
+  const oversubscribed = usePrefs
+    ? ALL_ROLES.map((role) => ({
+        role,
+        asked: [...rolePrefs.values()].filter((r) => r === role).length,
+        slots: slots.get(role) ?? 0,
+      })).filter((r) => r.asked > r.slots)
+    : [];
 
   return (
     <div className="layout">
@@ -500,7 +594,11 @@ function App() {
             <ul className="roster-list">
               {playersA.map((p) => (
                 <li key={p}>
-                  <span>{p}</span>
+                  <span className="roster-name">{p}</span>
+                  <RolePicker
+                    value={rolePrefs.get(p)}
+                    onPick={(role) => togglePref(p, role)}
+                  />
                   <button className="remove-btn" onClick={() => removePlayer("A", p)}>
                     x
                   </button>
@@ -529,7 +627,11 @@ function App() {
             <ul className="roster-list">
               {playersB.map((p) => (
                 <li key={p}>
-                  <span>{p}</span>
+                  <span className="roster-name">{p}</span>
+                  <RolePicker
+                    value={rolePrefs.get(p)}
+                    onPick={(role) => togglePref(p, role)}
+                  />
                   <button className="remove-btn" onClick={() => removePlayer("B", p)}>
                     x
                   </button>
@@ -557,7 +659,26 @@ function App() {
           />
           Avoid each player's last {HERO_COOLDOWN} heroes per role
         </label>
+        <label className="unique-toggle">
+          <input
+            type="checkbox"
+            checked={usePrefs}
+            onChange={(e) => setUsePrefs(e.target.checked)}
+          />
+          Use preferred roles
+        </label>
       </div>
+
+      {oversubscribed.length > 0 && (
+        <div className="pref-warning">
+          {oversubscribed.map((r) => (
+            <div key={r.role}>
+              {r.asked} {roleLabel(r.role)} requests, {r.slots} slot
+              {r.slots === 1 ? "" : "s"} — the rest will be rotated in elsewhere
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="action-buttons">
         <button
@@ -602,6 +723,13 @@ function App() {
                       </span>
                     </span>
                     <span className="hero-name">{player.hero}</span>
+                    {usePrefs &&
+                      rolePrefs.get(player.name) &&
+                      rolePrefs.get(player.name) !== player.role && (
+                        <span className="pref-missed">
+                          wanted {roleLabel(rolePrefs.get(player.name)!)}
+                        </span>
+                      )}
                     <button
                       className={`reroll-btn ${player.rerolled ? "reroll-used" : ""}`}
                       onClick={() => rerollHero(ti, pi)}
