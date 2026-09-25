@@ -215,11 +215,46 @@ function applyGrouping(teamA: string[], teamB: string[]): [string[], string[]] {
   return [a, b];
 }
 
-// Reshuffles everyone across both teams, honouring grouping preferences.
-function splitTeams(names: string[]): [string[], string[]] {
+// Hard rule, applied after every other preference: with two leads picked they
+// never share a team. When they do, one of them (picked at random, so neither
+// lead is favoured towards the bigger team on an odd pool) trades places with
+// someone on the other team — which holds no leads, so a swap partner always
+// exists and team sizes are kept. Grouped players are left where they are if
+// anyone else will do, so grouping only gives way when the lead rule forces it.
+function separateLeads(
+  teamA: string[],
+  teamB: string[],
+  leads: string[],
+): [string[], string[]] {
+  const a = [...teamA];
+  const b = [...teamB];
+  if (leads.length !== 2) return [a, b];
+  const inA = (name: string) => a.includes(name);
+  const inB = (name: string) => b.includes(name);
+  const together =
+    (inA(leads[0]) && inA(leads[1])) || (inB(leads[0]) && inB(leads[1]));
+  if (!together) return [a, b];
+
+  const [stay, move] = Math.random() < 0.5 ? leads : [leads[1], leads[0]];
+  const home = inA(stay) ? a : b;
+  const away = home === a ? b : a;
+  const kept = groupingEnabled() ? [...GROUPED, SEPARATED] : [];
+  const loose = away.filter((p) => !kept.includes(p.toLowerCase()));
+  const candidates = loose.length > 0 ? loose : away;
+  const partner = candidates[Math.floor(Math.random() * candidates.length)];
+  const i = home.indexOf(move);
+  const j = away.indexOf(partner);
+  [home[i], away[j]] = [away[j], home[i]];
+  return [a, b];
+}
+
+// Reshuffles everyone across both teams, honouring grouping preferences and,
+// above all of them, keeping the two leads apart.
+function splitTeams(names: string[], leads: string[]): [string[], string[]] {
   const all = shuffle(names);
   const mid = Math.ceil(all.length / 2);
-  return applyGrouping(all.slice(0, mid), all.slice(mid));
+  const [a, b] = applyGrouping(all.slice(0, mid), all.slice(mid));
+  return separateLeads(a, b, leads);
 }
 
 // One tank per team, two once a team reaches six. Short teams keep one of each
@@ -354,6 +389,31 @@ function RolePicker({
   );
 }
 
+// Marks a player as a team lead. Clicking a lit button clears it; once two
+// leads are picked the rest are locked until one is cleared.
+function LeadToggle({
+  active,
+  locked,
+  onToggle,
+}: {
+  active: boolean;
+  locked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`lead-btn ${active ? "active" : ""}`}
+      onClick={onToggle}
+      disabled={locked && !active}
+      title={active ? "Clear team lead" : "Make team lead"}
+      aria-pressed={active}
+    >
+      LEAD
+    </button>
+  );
+}
+
 function App() {
   const [inputA, setInputA] = useState("");
   const [inputB, setInputB] = useState("");
@@ -366,6 +426,9 @@ function App() {
   const [rolePrefs, setRolePrefs] = useState<RolePrefs>(new Map());
   // Lets a round ignore every request without anyone losing their pick.
   const [usePrefs, setUsePrefs] = useState(true);
+  // Up to two picked team leads. Once both are set they are always split onto
+  // opposite teams; with fewer than two picked, nothing changes.
+  const [leads, setLeads] = useState<string[]>([]);
   // Off by default: hero draws stay memoryless unless this is switched on.
   const [avoidRecent, setAvoidRecent] = useState(false);
   const [roleHistory, setRoleHistory] = useState<RoleHistory>(new Map());
@@ -416,12 +479,20 @@ function App() {
     });
   };
 
+  const toggleLead = (name: string) => {
+    setLeads((prev) => {
+      if (prev.includes(name)) return prev.filter((n) => n !== name);
+      return prev.length < 2 ? [...prev, name] : prev;
+    });
+  };
+
   const removePlayer = (team: "A" | "B", name: string) => {
     if (team === "A") {
       setPlayersA(playersA.filter((p) => p !== name));
     } else {
       setPlayersB(playersB.filter((p) => p !== name));
     }
+    setLeads((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : prev));
     setRolePrefs((prev) => {
       if (!prev.has(name)) return prev;
       const next = new Map(prev);
@@ -437,7 +508,7 @@ function App() {
 
     const stats = roleStats(roleHistory);
     const prefs = usePrefs && rolePrefs.size > 0 ? rolePrefs : undefined;
-    let split = splitTeams(everyone);
+    let split = splitTeams(everyone, leads);
     let orders: [string[], string[]] = [split[0], split[1]];
     let bestCost = Infinity;
 
@@ -446,7 +517,7 @@ function App() {
     // fits. A 5v5 has one tank slot per team against two of everything else,
     // so it can never rotate all ten — this shorts the fewest players.
     for (let attempt = 0; attempt < SPLIT_ATTEMPTS; attempt++) {
-      const candidate = attempt === 0 ? split : splitTeams(everyone);
+      const candidate = attempt === 0 ? split : splitTeams(everyone, leads);
       const a = bestLineup(candidate[0], stats, prefs);
       const b = bestLineup(candidate[1], stats, prefs);
       if (a.cost + b.cost < bestCost) {
@@ -595,6 +666,11 @@ function App() {
               {playersA.map((p) => (
                 <li key={p}>
                   <span className="roster-name">{p}</span>
+                  <LeadToggle
+                    active={leads.includes(p)}
+                    locked={leads.length >= 2}
+                    onToggle={() => toggleLead(p)}
+                  />
                   <RolePicker
                     value={rolePrefs.get(p)}
                     onPick={(role) => togglePref(p, role)}
@@ -628,6 +704,11 @@ function App() {
               {playersB.map((p) => (
                 <li key={p}>
                   <span className="roster-name">{p}</span>
+                  <LeadToggle
+                    active={leads.includes(p)}
+                    locked={leads.length >= 2}
+                    onToggle={() => toggleLead(p)}
+                  />
                   <RolePicker
                     value={rolePrefs.get(p)}
                     onPick={(role) => togglePref(p, role)}
@@ -669,6 +750,12 @@ function App() {
         </label>
       </div>
 
+      {leads.length === 1 && (
+        <div className="pref-warning">
+          Pick one more lead to keep the leads on opposite teams
+        </div>
+      )}
+
       {oversubscribed.length > 0 && (
         <div className="pref-warning">
           {oversubscribed.map((r) => (
@@ -706,6 +793,9 @@ function App() {
                     </span>
                     <span className="player-name" tabIndex={0}>
                       {player.name}
+                      {leads.includes(player.name) && (
+                        <span className="lead-tag">LEAD</span>
+                      )}
                       <span className="role-history">
                         <span className="role-history-title">Role history</span>
                         {(roleHistory.get(player.name) ?? []).map((entry) => (
