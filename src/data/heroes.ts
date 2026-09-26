@@ -1,7 +1,6 @@
 export const tankHeroes = [
   "D.Va",
   "Doomfist",
-  "Hazard",
   "Junker Queen",
   "Mauga",
   "Orisa",
@@ -12,7 +11,8 @@ export const tankHeroes = [
   "Winston",
   "Wrecking Ball",
   "Zarya",
-  "Domina"
+  "Domina",
+  "D.Mon"
 ];
 
 export const dpsHeroes = [
@@ -51,5 +51,6 @@ export const supportHeroes = [
   "Mercy",
   "Moira",
   "Zenyatta",
-  "Mizuki"
+  "Mizuki",
+  "JPC"
 ];
