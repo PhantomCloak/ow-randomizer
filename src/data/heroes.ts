@@ -29,7 +29,6 @@ export const dpsHeroes = [
   "Reaper",
   "Sojourn",
   "Soldier: 76",
-  "Sombra",
   "Symmetra",
   "Torbjörn",
   "Tracer",
@@ -52,5 +51,7 @@ export const supportHeroes = [
   "Moira",
   "Zenyatta",
   "Mizuki",
-  "JPC"
+  "JPC",
+  "Sombra",
+  "Doctorine"
 ];
